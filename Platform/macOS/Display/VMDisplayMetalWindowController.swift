@@ -21,24 +21,20 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
     @objc dynamic var vmDisplay: CSDisplayMetal?
     @objc dynamic var vmInput: CSInput?
     
-    override var isMouseCaptued: Bool {
-        didSet {
-            if isMouseCaptued {
-                captureMouse()
-            } else {
-                releaseMouse()
-            }
-        }
-    }
-    
     private var displaySizeObserver: NSKeyValueObservation?
     private var displaySize: CGSize = .zero
+    private var isDisplaySizeDynamic: Bool = false
+    private var isFullScreen: Bool = false
+    private let minDynamicSize = CGSize(width: 800, height: 600)
+    
+    private var ctrlKeyDown: Bool = false
     
     // MARK: - User preferences
     
     @Setting("NoCursorCaptureAlert") private var isCursorCaptureAlertShown: Bool = false
     @Setting("AlwaysNativeResolution") private var isAlwaysNativeResolution: Bool = false
     @Setting("DisplayFixed") private var isDisplayFixed: Bool = false
+    @Setting("CtrlRightClick") private var isCtrlRightClick: Bool = false
     private var settingObservations = [NSKeyValueObservation]()
     
     // MARK: - Init
@@ -46,7 +42,7 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
     override func windowDidLoad() {
         super.windowDidLoad()
         metalView = VMMetalView(frame: displayView.bounds)
-        metalView.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        metalView.autoresizingMask = [.width, .height]
         metalView.device = MTLCreateSystemDefaultDevice()
         guard let _ = metalView.device else {
             showErrorAlert(NSLocalizedString("Metal is not supported on this device. Cannot render display.", comment: "VMDisplayMetalWindowController"))
@@ -74,11 +70,15 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
         
         if vm.state == .vmStopped || vm.state == .vmSuspended {
             enterSuspended(isBusy: false)
-            vm.startVM()
+            DispatchQueue.global(qos: .userInitiated).async {
+                if self.vm.startVM() {
+                    self.vm.ioDelegate = self
+                }
+            }
         } else {
             enterLive()
+            vm.ioDelegate = self
         }
-        vm.ioDelegate = self
     }
     
     override func enterLive() {
@@ -90,7 +90,11 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
             guard let size = change.newValue else { return }
             self.displaySizeDidChange(size: size)
         }
+        if vmConfiguration!.shareClipboardEnabled {
+            UTMPasteboard.general.requestPollingMode(forHashable: self) // start clipboard polling
+        }
         super.enterLive()
+        resizeConsoleToolbarItem.isEnabled = false // disable item
     }
     
     override func enterSuspended(isBusy busy: Bool) {
@@ -99,40 +103,44 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
             screenshotView.image = vm.screenshot?.image
             screenshotView.isHidden = false
         }
+        if vmConfiguration!.shareClipboardEnabled {
+            UTMPasteboard.general.releasePollingMode(forHashable: self) // stop clipboard polling
+        }
         super.enterSuspended(isBusy: busy)
+    }
+    
+    override func captureMouseButtonPressed(_ sender: Any) {
+        captureMouse()
     }
 }
     
 // MARK: - Screen management
 extension VMDisplayMetalWindowController {
-    func displaySizeDidChange(size: CGSize) {
-        if size == .zero {
+    fileprivate func displaySizeDidChange(size: CGSize) {
+        guard size != .zero else {
             logger.debug("Ignoring zero size display")
             return
         }
-        logger.debug("resizing to: (\(size.width), \(size.height))")
-        displaySize = size
         DispatchQueue.main.async {
-            guard let window = self.window else { return }
-            guard let vmDisplay = self.vmDisplay else { return }
-            let currentScreenScale = window.screen?.backingScaleFactor ?? 1.0
-            let nativeScale = self.isAlwaysNativeResolution ? 1.0 : currentScreenScale
-            // change optional scale if needed
-            if self.isDisplayFixed || (!self.isAlwaysNativeResolution && vmDisplay.viewportScale < currentScreenScale) {
-                vmDisplay.viewportScale = nativeScale
+            logger.debug("resizing to: (\(size.width), \(size.height))")
+            guard let window = self.window else {
+                logger.debug("Invalid window, ignoring size change")
+                return
             }
-            let minScaledSize = CGSize(width: size.width * nativeScale / currentScreenScale, height: size.height * nativeScale / currentScreenScale)
-            let contentRect = CGRect(x: window.frame.origin.x,
-                                     y: 0,
-                                     width: size.width * vmDisplay.viewportScale / currentScreenScale,
-                                     height: size.height * vmDisplay.viewportScale / currentScreenScale)
-            var windowRect = window.frameRect(forContentRect: contentRect)
-            windowRect.origin.y = window.frame.origin.y + window.frame.height - windowRect.height
-            window.contentMinSize = minScaledSize
-            window.contentAspectRatio = size
-            window.setFrame(windowRect, display: false, animate: true)
-            self.metalView.setFrameSize(contentRect.size)
+            self.displaySize = size
+            if self.isFullScreen {
+                _ = self.updateHostScaling(for: window, frameSize: window.frame.size)
+            } else {
+                self.updateHostFrame(forGuestResolution: size)
+            }
         }
+    }
+    
+    func dynamicResolutionSupportDidChange(_ supported: Bool) {
+        if isDisplaySizeDynamic != supported {
+            displaySizeDidChange(size: displaySize)
+        }
+        isDisplaySizeDynamic = supported
     }
     
     func windowDidChangeScreen(_ notification: Notification) {
@@ -142,10 +150,37 @@ extension VMDisplayMetalWindowController {
         }
     }
     
-    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        guard !isDisplayFixed else { return frameSize }
+    fileprivate func updateHostFrame(forGuestResolution size: CGSize) {
+        guard let window = window else { return }
+        guard let vmDisplay = vmDisplay else { return }
+        let currentScreenScale = window.screen?.backingScaleFactor ?? 1.0
+        let nativeScale = isAlwaysNativeResolution ? 1.0 : currentScreenScale
+        // change optional scale if needed
+        if isDisplaySizeDynamic || isDisplayFixed || (!isAlwaysNativeResolution && vmDisplay.viewportScale < currentScreenScale) {
+            vmDisplay.viewportScale = nativeScale
+        }
+        let minScaledSize = CGSize(width: size.width * nativeScale / currentScreenScale, height: size.height * nativeScale / currentScreenScale)
+        let fullContentWidth = size.width * vmDisplay.viewportScale / currentScreenScale
+        let fullContentHeight = size.height * vmDisplay.viewportScale / currentScreenScale
+        let contentRect = CGRect(x: window.frame.origin.x,
+                                 y: 0,
+                                 width: ceil(fullContentWidth),
+                                 height: ceil(fullContentHeight))
+        var windowRect = window.frameRect(forContentRect: contentRect)
+        windowRect.origin.y = window.frame.origin.y + window.frame.height - windowRect.height
+        if isDisplaySizeDynamic {
+            window.contentMinSize = minDynamicSize
+            window.contentResizeIncrements = NSSize(width: 1, height: 1)
+            window.setFrame(windowRect, display: false, animate: false)
+        } else {
+            window.contentMinSize = minScaledSize
+            window.contentAspectRatio = size
+            window.setFrame(windowRect, display: false, animate: true)
+        }
+    }
+    
+    fileprivate func updateHostScaling(for window: NSWindow, frameSize: NSSize) -> NSSize {
         guard displaySize != .zero else { return frameSize }
-        guard let window = self.window else { return frameSize }
         guard let vmDisplay = self.vmDisplay else { return frameSize }
         let currentScreenScale = window.screen?.backingScaleFactor ?? 1.0
         let targetContentSize = window.contentRect(forFrameRect: CGRect(origin: .zero, size: frameSize)).size
@@ -156,19 +191,55 @@ extension VMDisplayMetalWindowController {
         let targetFrameSize = window.frameRect(forContentRect: CGRect(origin: .zero, size: scaledSize)).size
         vmDisplay.viewportScale = targetScale
         logger.debug("changed scale \(targetScale)")
-        self.metalView.setFrameSize(scaledSize)
         return targetFrameSize
     }
     
+    fileprivate func updateGuestResolution(for window: NSWindow, frameSize: NSSize) -> NSSize {
+        guard let vmDisplay = self.vmDisplay else { return frameSize }
+        let currentScreenScale = window.screen?.backingScaleFactor ?? 1.0
+        let nativeScale = isAlwaysNativeResolution ? currentScreenScale : 1.0
+        let targetSize = window.contentRect(forFrameRect: CGRect(origin: .zero, size: frameSize)).size
+        let targetSizeScaled = isAlwaysNativeResolution ? targetSize.applying(CGAffineTransform(scaleX: nativeScale, y: nativeScale)) : targetSize
+        logger.debug("Requesting resolution: (\(targetSizeScaled.width), \(targetSizeScaled.height))")
+        let bounds = CGRect(origin: .zero, size: targetSizeScaled)
+        vmDisplay.requestResolution(bounds)
+        return frameSize
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard !self.isDisplaySizeDynamic else {
+            return frameSize
+        }
+        guard !self.isDisplayFixed else {
+            return frameSize
+        }
+        return updateHostScaling(for: sender, frameSize: frameSize)
+    }
+    
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard self.isDisplaySizeDynamic, let window = self.window else {
+            return
+        }
+        _ = updateGuestResolution(for: window, frameSize: window.frame.size)
+    }
+    
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        isFullScreen = true
+    }
+    
+    func windowDidExitFullScreen(_ notification: Notification) {
+        isFullScreen = false
+    }
+    
     func windowDidBecomeKey(_ notification: Notification) {
-        if let metalView = self.metalView {
-            metalView.becomeFirstResponder()
+        if let window = self.window {
+            _ = window.makeFirstResponder(metalView)
         }
     }
     
     func windowDidResignKey(_ notification: Notification) {
-        if let metalView = self.metalView {
-            metalView.resignFirstResponder()
+        if let window = self.window {
+            _ = window.makeFirstResponder(nil)
         }
     }
 }
@@ -177,7 +248,7 @@ extension VMDisplayMetalWindowController {
 extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
     private func captureMouse() {
         let action = { () -> Void in
-            self.vmInput?.requestMouseMode(false)
+            self.vm.requestInputTablet(false)
             self.metalView?.captureMouse()
         }
         if isCursorCaptureAlertShown {
@@ -197,7 +268,7 @@ extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
     }
     
     private func releaseMouse() {
-        vmInput?.requestMouseMode(true)
+        vm.requestInputTablet(true)
         metalView?.releaseMouse()
     }
     
@@ -208,8 +279,10 @@ extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
         let frameSize = metalView.frame.size
         let newX = absolutePoint.x * currentScreenScale / viewportScale
         let newY = (frameSize.height - absolutePoint.y) * currentScreenScale / viewportScale
+        let point = CGPoint(x: newX, y: newY)
         logger.debug("move cursor: cocoa (\(absolutePoint.x), \(absolutePoint.y)), native (\(newX), \(newY))")
-        vmInput?.sendMouseMotion(button, point: CGPoint(x: newX, y: newY))
+        vmInput?.sendMouseMotion(button, point: point)
+        vmInput?.forceCursorPosition(point) // required to show cursor on screen
     }
     
     func mouseMove(relativePoint: CGPoint, button: CSInputButton) {
@@ -217,12 +290,22 @@ extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
         vmInput?.sendMouseMotion(button, point: translated)
     }
     
+    private func modifyMouseButton(_ button: CSInputButton) -> CSInputButton {
+        let buttonMod: CSInputButton
+        if button.contains(.left) && ctrlKeyDown && isCtrlRightClick {
+            buttonMod = button.subtracting(.left).union(.right)
+        } else {
+            buttonMod = button
+        }
+        return buttonMod
+    }
+    
     func mouseDown(button: CSInputButton) {
-        vmInput?.sendMouseButton(button, pressed: true, point: .zero)
+        vmInput?.sendMouseButton(modifyMouseButton(button), pressed: true, point: .zero)
     }
     
     func mouseUp(button: CSInputButton) {
-        vmInput?.sendMouseButton(button, pressed: false, point: .zero)
+        vmInput?.sendMouseButton(modifyMouseButton(button), pressed: false, point: .zero)
     }
     
     func mouseScroll(dy: CGFloat, button: CSInputButton) {
@@ -244,11 +327,20 @@ extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
     }
     
     func keyDown(keyCode: Int) {
+        if (keyCode & 0xFF) == 0x1D { // Ctrl
+            ctrlKeyDown = true
+        }
         sendExtendedKey(.press, keyCode: keyCode)
     }
     
     func keyUp(keyCode: Int) {
+        if (keyCode & 0xFF) == 0x1D { // Ctrl
+            ctrlKeyDown = false
+        }
         sendExtendedKey(.release, keyCode: keyCode)
     }
     
+    func requestReleaseCapture() {
+        releaseMouse()
+    }
 }

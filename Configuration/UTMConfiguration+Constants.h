@@ -27,12 +27,12 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSArray<NSString *>*)supportedImageTypes;
 + (NSArray<NSString *>*)supportedResolutions;
 + (NSArray<NSString *>*)supportedDriveInterfaces;
++ (NSArray<NSString *>*)supportedDriveInterfacesPretty;
 + (NSArray<NSString *>*)supportedScalersPretty;
 + (NSArray<NSString *>*)supportedScalers;
 + (NSArray<NSString *>*)supportedConsoleThemes API_AVAILABLE(ios(11));
 + (NSArray<NSString *>*)supportedConsoleFonts API_AVAILABLE(ios(11));
 + (NSString *)diskImagesDirectory;
-+ (NSString *)defaultDriveInterface;
 + (NSString *)debugLogName;
 
 @end
@@ -41,13 +41,18 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (NSArray<NSString *>*)supportedArchitectures;
 + (NSArray<NSString *>*)supportedArchitecturesPretty;
++ (nullable NSArray<NSString *>*)supportedCpusForArchitecture:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedCpusForArchitecturePretty:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedCpuFlagsForArchitecture:(nullable NSString *)architecture;
 + (nullable NSArray<NSString *>*)supportedTargetsForArchitecture:(nullable NSString *)architecture;
 + (nullable NSArray<NSString *>*)supportedTargetsForArchitecturePretty:(nullable NSString *)architecture;
 + (NSInteger)defaultTargetIndexForArchitecture:(nullable NSString *)architecture;
-+ (NSArray<NSString *>*)supportedNetworkCards;
-+ (NSArray<NSString *>*)supportedNetworkCardsPretty;
-+ (NSArray<NSString *>*)supportedSoundCardDevices;
-+ (NSArray<NSString *>*)supportedSoundCardDevicesPretty;
++ (nullable NSArray<NSString *>*)supportedDisplayCardsForArchitecture:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedDisplayCardsForArchitecturePretty:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedNetworkCardsForArchitecture:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedNetworkCardsForArchitecturePretty:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedSoundCardsForArchitecture:(nullable NSString *)architecture;
++ (nullable NSArray<NSString *>*)supportedSoundCardsForArchitecturePretty:(nullable NSString *)architecture;
 
 @end
 

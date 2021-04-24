@@ -17,6 +17,8 @@
 #import "VMConfigDriveDetailViewController.h"
 #import "UTMConfiguration.h"
 #import "UTMConfiguration+Constants.h"
+#import "UTMConfiguration+Defaults.h"
+#import "UTMConfiguration+System.h"
 #import "VMConfigDrivePickerViewController.h"
 #import "VMConfigPickerView.h"
 #import "VMConfigTogglePickerCell.h"
@@ -47,7 +49,7 @@
         [self showImagePathCell:!self.removable animated:NO];
     } else {
         self.imageType = UTMDiskImageTypeDisk;
-        self.driveInterfaceType = [UTMConfiguration defaultDriveInterface];
+        self.driveInterfaceType = [UTMConfiguration defaultDriveInterfaceForTarget:self.configuration.systemTarget type:UTMDiskImageTypeDisk];
     }
     if (self.imageType == UTMDiskImageTypeDisk || self.imageType == UTMDiskImageTypeCD) {
         [self showDriveTypeOptions:YES animated:NO];
@@ -102,7 +104,7 @@
 - (void)imageTypeChanged {
     if (self.imageType == UTMDiskImageTypeDisk || self.imageType == UTMDiskImageTypeCD) {
         if (self.driveInterfaceType.length == 0) {
-            self.driveInterfaceType = [UTMConfiguration defaultDriveInterface];
+            self.driveInterfaceType = [UTMConfiguration defaultDriveInterfaceForTarget:self.configuration.systemTarget type:self.imageType];
         }
         [self showDriveTypeOptions:YES animated:NO];
     } else {
@@ -166,9 +168,7 @@
         }
     } else {
         [self.configuration setDriveRemovable:self.removable forIndex:self.driveIndex];
-        if (self.removable) {
-            [self.configuration setImagePath:@"" forIndex:self.driveIndex];
-        } else {
+        if (!self.removable) {
             [self.configuration setImagePath:self.imageName forIndex:self.driveIndex];
         }
         [self.configuration setDriveInterfaceType:self.driveInterfaceType forIndex:self.driveIndex];

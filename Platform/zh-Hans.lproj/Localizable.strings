@@ -1,5 +1,14 @@
 /* VMConfigDriveCreateViewController */
-"A file already exists for this name, if you proceed, it will be replaced." = "同名的项目已被创建，如果您继续，正在创建的项目将会替换它。";
+"A file already exists for this name, if you proceed, it will be replaced." = "已存在同名的项目，如果您继续操作，正在创建的项目将会替换原有的同名项目。";
+
+/* No comment provided by engineer. */
+"Do you want to duplicate this VM and all its data?" = "是否要复制该虚拟机及其所有数据?";
+
+/* No comment provided by engineer. */
+"Do you want to delete this VM and all its data?" = "是否删除该虚拟机及其所有数据?";
+
+/* No comment provided by engineer. */
+"Do you want to force stop this VM and lose all unsaved data?" = "是否要强制关闭该虚拟机并丢失所有未保存的数据?";
 
 /* No comment provided by engineer. */
 "Acceleration" = "加速";
@@ -8,7 +17,7 @@
 "Additional Settings" = "附加设置";
 
 /* No comment provided by engineer. */
-"Advanced: Bypass configuration and manually specify arguments" = "高级：绕过配置并手动指定参数";
+"Advanced: Bypass configuration and manually specify arguments" = "高级:手动设置参数";
 
 /* VMConfigSystemView */
 "Allocating too much memory will crash the VM. Your device has %llu MB of memory and the estimated usage is %llu MB." = "设置过多的内存会停止VM运行。你的设备拥有 %1$llu MB 的内存，估计使用量是 %2$llu MB。";
@@ -17,10 +26,10 @@
 "Always use native (HiDPI) resolution" = "始终使用本机（HiDPI）分辨率";
 
 /* VMDisplayWindowController */
-"An internal error has occured." = "发生内部错误。";
+"An internal error has occured." = "发生未知错误。";
 
 /* VMDisplayViewController */
-"An internal error has occured. UTM will terminate." = "发生了一个内部错误。 UTM即将退出。";
+"An internal error has occured. UTM will terminate." = "发生未知错误。 UTM即将退出...";
 
 /* No comment provided by engineer. */
 "Another Tab" = "另一个选项";
@@ -89,7 +98,7 @@
 "Change" = "变化";
 
 /* No comment provided by engineer. */
-"Clear" = "清晰";
+"Clear" = "清除";
 
 /* No comment provided by engineer. */
 "Clipboard Sharing" = "剪贴板共享";
@@ -115,6 +124,21 @@
 /* No comment provided by engineer. */
 "CPU Count" = "CPU核心数";
 
+/* No comment provided by engineer. */
+"CPU Cores" = "CPU核心数";
+
+/* No comment provided by engineer. */
+"Boot Options" = "启动选项";
+
+/* No comment provided by engineer. */
+"These settings are unavailable in console display mode" = "这些设置在控制台视图下不可用";
+
+/* No comment provided by engineer. */
+"Default" = "默认";
+
+/* No comment provided by engineer. */
+"Blinking Cursor" = "闪烁光标";
+
 /* Create button */
 "Create" = "创建";
 
@@ -135,6 +159,15 @@
    VMConfigDirectoryPickerViewController */
 "Delete" = "删除";
 
+/* No comment provided by engineer. */
+"Do you want to duplicate this VM and all its data?" = "是否要复制该虚拟机及其所有数据?";
+
+/* No comment provided by engineer. */
+"Do you want to delete this VM and all its data?" = "是否删除该虚拟机及其所有数据?";
+
+/* No comment provided by engineer. */
+"Do you want to force stop this VM and lose all unsaved data?" = "是否要关闭该虚拟机并丢失所有未保存的数据?";
+
 /* VMConfigDrivesViewController */
 "Delete Data" = "删除数据";
 
@@ -148,13 +181,13 @@
 "DHCP Host" = "DHCP服务器";
 
 /* No comment provided by engineer. */
-"DHCP Start" = "DHCP开始";
+"DHCP Start" = "起始DHCP";
 
 /* VMConfigDirectoryPickerViewController */
 "Directory Name" = "目录名称";
 
 /* VMDisplayTerminalViewController */
-"Disable this bar in Settings -> General -> Keyboards -> Shortcuts" = "在 设置->通用->键盘->快捷键 中禁用此栏";
+"Disable this bar in Settings -> General -> Keyboards -> Shortcuts" = "在 设置 -> 通用 -> 键盘 -> 快捷键 中禁用此栏";
 
 /* VMConfigDriveCreateViewController */
 "Disk creation failed." = "磁盘镜像创建失败";
@@ -166,13 +199,13 @@
 "DNS Search Domains" = "DNS搜索域";
 
 /* No comment provided by engineer. */
-"DNS Server" = "DNS服务器";
+"DNS Server" = "DNS服务器(IPv4)";
 
 /* No comment provided by engineer. */
 "DNS Server (IPv6)" = "DNS服务器(IPv6)";
 
 /* VMConfigDrivesViewController */
-"Do you want to also delete the disk image data? If yes, the data will be lost. Otherwise, you can create a new drive with the existing data." = "您是否还要删除磁盘映像数据呢?如果是，数据将丢失。否则，您可以使用现有数据创建一个新驱动器。";
+"Do you want to also delete the disk image data? If yes, the data will be lost. Otherwise, you can create a new drive with the existing data." = "您是否还要删除磁盘映像数据?如果是，数据将丢失。否则，您可以使用现有数据创建一个新驱动器。";
 
 /* VMConfigDirectoryPickerViewController
    VMConfigPortForwardingViewController */
@@ -194,13 +227,13 @@
 "Emulated Network Card" = "模拟网卡";
 
 /* No comment provided by engineer. */
-"Enable Clipboard Sharing" = "启用剪贴板共享";
+"Enable Clipboard Sharing" = "剪贴板共享";
 
 /* No comment provided by engineer. */
-"Enable Directory Sharing" = "启用目录共享";
+"Enable Directory Sharing" = "目录共享";
 
 /* No comment provided by engineer. */
-"Enabled" = "已启用";
+"Enabled" = "启用";
 
 /* VMDisplayWindowController */
 "Error" = "错误";
@@ -215,25 +248,25 @@
 "Failed create bookmark." = "创建书签失败。";
 
 /* UTMVirtualMachine+Drives */
-"Failed to access drive image path." = "无法访问驱动器映像路径。";
+"Failed to access drive image path." = "无法访问驱动器映像路径";
 
 /* VMConfigInfoView */
-"Failed to check name." = "无法检查名称。";
+"Failed to check name." = "无法检查名称";
 
 /* UTMData */
-"Failed to clone VM." = "无法复制VM。";
+"Failed to clone VM." = "无法复制VM";
 
 /* UTMSpiceIO */
-"Failed to connect to SPICE server." = "无法连接到SPICE服务器。";
+"Failed to connect to SPICE server." = "无法连接到SPICE服务器";
 
 /* VMRemovableDrivesViewController */
-"Failed to get VM object." = "无法获取VM对象。";
+"Failed to get VM object." = "无法获取VM对象";
 
 /* UTMVirtualMachine */
 "Failed to load plist" = "无法加载plist";
 
 /* UTMData */
-"Failed to parse imported VM." = "无法分析导入的VM。";
+"Failed to parse imported VM." = "无法解析导入的VM。";
 
 /* VMDisplayViewController */
 "Failed to save VM state. Do you have at least one read-write drive attached that supports snapshots?" = "保存虚拟机状态失败。 您是否装载了至少一个支持快照的读写驱动器？";
@@ -257,7 +290,7 @@
 "Full Graphics" = "完整图形";
 
 /* No comment provided by engineer. */
-"Gesture and Cursor Settings" = "完整的图形几何图形和光标设置";
+"Gesture and Cursor Settings" = "更多图形和光标设置";
 
 /* No comment provided by engineer. */
 "Go to Gallery" = "转到图库";
@@ -311,7 +344,7 @@
 "Icon" = "图标";
 
 /* No comment provided by engineer. */
-"Image Type" = "图标格式";
+"Image Type" = "格式";
 
 /* Import button */
 "Import" = "导入";
@@ -320,7 +353,7 @@
 "Importing %@..." = "导入 %@...";
 
 /* No comment provided by engineer. */
-"Interface" = "界面";
+"Interface" = "接口";
 
 /* UTMQemu */
 "Internal error has occurred." = "发生内部错误";
@@ -392,7 +425,7 @@
 "Linux RAM Disk" = "Linux RAM 磁盘";
 
 /* No comment provided by engineer. */
-"Logging" = "登录中";
+"Logging" = "日志";
 
 /* UTMQemuManager */
 "Manager being deallocated, killing pending RPC." = "正在释放管理器，正在终止挂起的RPC。";
@@ -413,7 +446,7 @@
 "Moving %@..." = "删除 %@...";
 
 /* Clone VM name prompt title */
-"Name" = "名字";
+"Name" = "名称";
 
 /* VMConfigInfoView */
 "Name is an invalid filename." = "名称是无效的文件名。";
@@ -463,10 +496,10 @@
 "None" = "空";
 
 /* No comment provided by engineer. */
-"Note: select the path to share from the main screen." = "注意：从主屏幕选择要共享的路径。";
+"Note: select the path to share from the main screen." = "注意：请从主屏幕选取文件共享的路径。";
 
 /* No comment provided by engineer. */
-"Notes" = "注意";
+"Notes" = "备注";
 
 /* OK button
    OK Button */
@@ -479,7 +512,7 @@
 "Play" = "继续";
 
 /* No comment provided by engineer. */
-"Port Forward" = "前进";
+"Port Forward" = "更多";
 
 /* No comment provided by engineer. */
 "Protocol" = "协议";
@@ -494,7 +527,7 @@
 "QEMU exited from an error: %@" = "QEMU遇到错误退出: %@";
 
 /* No comment provided by engineer. */
-"QEMU Machine Properties" = "QEMU机器属性";
+"QEMU Machine Properties" = "QEMU属性";
 
 /* VMDisplayWindowController */
 "Querying drives status..." = "正在查询驱动器状态...";
@@ -503,10 +536,10 @@
 "Read Only" = "只读";
 
 /* No comment provided by engineer. */
-"Removable" = "可移除";
+"Removable" = "可扩展";
 
 /* No comment provided by engineer. */
-"Requires SPICE guest agent tools to be installed." = "需要安装SPICE来宾代理工具。";
+"Requires SPICE guest agent tools to be installed." = "需要安装SPICE代理工具。";
 
 /* No comment provided by engineer. */
 "Requires SPICE guest agent tools to be installed. Retina Mode is recommended only if the guest OS supports HiDPI." = "需要安装SPICE来宾代理工具。只有当来宾操作系统支持HiDPI时，才建议使用Retina模式。";
@@ -548,7 +581,7 @@
 "Selected:" = "选择:";
 
 /* No comment provided by engineer. */
-"Set to 0 for default which is 1/4 of the allocated Memory size. This is in addition to the host memory!" = "默认设置为0，即分配内存大小的1/4。这是除了主机内存！";
+"Set to 0 for default which is 1/4 of the allocated Memory size. This is in addition to the host memory!" = "默认设置为0，即分配内存大小的1/4。主机内存除外。";
 
 /* No comment provided by engineer. */
 "Set to 0 to use maximum supported CPUs. Force multicore might result in incorrect emulation." = "设置为0以使用最大支持的CPU。强制多核可能导致不正确的模拟。";
@@ -566,7 +599,7 @@
 "Shared path is no longer valid. Please re-choose." = "共享目录已经失效， 请重新选择。";
 
 /* No comment provided by engineer. */
-"Show Advanced Settings" = "显示高级设置";
+"Show Advanced Settings" = "高级设置";
 
 /* No comment provided by engineer. */
 "Size" = "大小";
@@ -593,19 +626,19 @@
 "The Last Tab" = "最后一个选项卡";
 
 /* VMConfigSystemViewController */
-"The total memory usage is close to your device's limit. iOS will kill the VM if it consumes too much memory." = "此内存设置接近您设备可用内存的极限。消耗过大内存的虚拟机会被iOS强制终止。";
+"The total memory usage is close to your device's limit. iOS will kill the VM if it consumes too much memory." = "此内存接近您的设备可用内存极限。消耗过大内存的虚拟机会被iOS系统强制终止。";
 
 /* No comment provided by engineer. */
 "Theme" = "主题";
 
 /* VMDisplayWindowController */
-"This may corrupt the VM and any unsaved changes will be lost. To quit safely, shut down from the guest." = "这可能会损坏虚拟机，任何未保存的更改都将丢失。为了安全退出，请关闭客人用户。";
+"This may corrupt the VM and any unsaved changes will be lost. To quit safely, shut down from the guest." = "这可能会损坏虚拟机，任何未保存的更改都将丢失。为了安全退出，请关闭来宾账户。";
 
 /* UTMVirtualMachine+Drives */
 "This version of UTM does not allow file access outside of UTM's Documents directory." = "此版本的UTM不允许访问UTM文档目录之外的文件。";
 
 /* VMDisplayWindowController */
-"This will reset the VM and any unsaved state will be lost." = "这将重置虚拟机，任何未保存的状态都将丢失。";
+"This will reset the VM and any unsaved state will be lost." = "这将重置虚拟机，任何未保存的更改都将丢失。";
 
 /* UTMQemuManager */
 "Timed out waiting for RPC." = "RPC连接超时。";
@@ -661,4 +694,91 @@
 "You must terminate the running VM before you can import a new VM." = "必须先终止正在运行的虚拟机，然后才能导入新的虚拟机。";
 
 /* No comment provided by engineer. */
-"Your version of iOS does not support running VMs while unmodified. You must either run UTM while jailbroken or with a remote debugger attached." = "您的iOS版本不支持在未修改的情况下运行VMs。您必须在越狱时运行UTM，或者附加远程调试器。";
+"Your version of iOS does not support running VMs while unmodified. You must either run UTM while jailbroken or with a remote debugger attached." = "您的iOS版本不支持在未越狱的情况下运行虚拟机。您必须在越狱时运行UTM，或者附加远程调试器。";
+
+/* No comment provided by engineer. */
+"Information" = "基本信息";
+
+/* No comment provided by engineer. */
+"Settings" = "设置";
+
+/* No comment provided by engineer. */
+"QEMU" = "QEMU";
+
+/* No comment provided by engineer. */
+"Drives" = "驱动器";
+
+/* No comment provided by engineer. */
+"Display" = "显示";
+
+/* No comment provided by engineer. */
+"Input" = "输入";
+
+/* No comment provided by engineer. */
+"Network" = "网络";
+
+/* No comment provided by engineer. */
+"Sound" = "声音";
+
+/* No comment provided by engineer. */
+"Sharing" = "共享";
+
+/* No comment provided by engineer. */
+"Create a New Virtual Machine" = "新建一个虚拟机";
+
+/* No comment provided by engineer. */
+"User Guide" = "使用说明 ";
+
+/* No comment provided by engineer. */
+"Browse UTM Gallery" = "访问UTM镜像库";
+
+/* No comment provided by engineer. */
+"Generic" = "默认";
+
+/* No comment provided by engineer. */
+"Operating System" = "操作系统图标";
+
+/* No comment provided by engineer. */
+"Custom" = "自定义";
+
+/* No comment provided by engineer. */
+"Machine" = "处理器";
+
+/* No comment provided by engineer. */
+"Edit" = "编辑";
+
+/* No comment provided by engineer. */
+"Run" = "运行";
+
+/* No comment provided by engineer. */
+"None" = "无";
+
+/* No comment provided by engineer. */
+"Running" = "运行中";
+
+/* No comment provided by engineer. */
+"Not running" = "未运行";
+
+/* No comment provided by engineer. */
+"Suspended" = "暂停中";
+
+/* No comment provided by engineer. */
+"Status" = "状态";
+
+/* No comment provided by engineer. */
+"Stop" = "终止";
+
+/* No comment provided by engineer. */
+"Do you want to force stop this VM and lose all unsaved data?" = "您是否想强制停止此VM并丢失所有未保存的数据?";
+
+/* No comment provided by engineer. */
+"Export Debug Log" = "导出日志";
+
+/* No comment provided by engineer. */
+"Boot Order" = "启动顺序";
+
+/* No comment provided by engineer. */
+"Cannot allocate memory" = "无法分配内存(可能是内存过大)";
+
+/* No comment provided by engineer. */
+"Export QEMU Command" = "导出QEMU命令";

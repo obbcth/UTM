@@ -23,6 +23,10 @@ struct VMConfigSharingView: View {
     var body: some View {
         VStack {
             Form {
+                if config.displayConsoleOnly {
+                    Text("These settings are unavailable in console display mode.")
+                }
+                
                 Section(header: Text("Clipboard Sharing"), footer: Text("Requires SPICE guest agent tools to be installed.").padding(.bottom)) {
                     Toggle(isOn: $config.shareClipboardEnabled, label: {
                         Text("Enable Clipboard Sharing")
@@ -32,13 +36,16 @@ struct VMConfigSharingView: View {
                 Section(header: Text("Shared Directory"), footer: Text("Requires SPICE WebDAV service to be installed.").padding(.bottom)) {
                     Toggle(isOn: $config.shareDirectoryEnabled.animation(), label: {
                         Text("Enable Directory Sharing")
+                    }).onChange(of: config.shareDirectoryEnabled, perform: { _ in
+                        // remove legacy bookmark data
+                        config.shareDirectoryBookmark = nil
                     })
                     Toggle(isOn: $config.shareDirectoryReadOnly, label: {
                         Text("Read Only")
                     })
                     Text("Note: select the path to share from the main screen.")
                 }
-            }
+            }.disabled(config.displayConsoleOnly)
         }
     }
 }

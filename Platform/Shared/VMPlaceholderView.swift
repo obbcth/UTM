@@ -18,7 +18,7 @@ import SwiftUI
 
 @available(iOS 14, macOS 11, *)
 struct VMPlaceholderView: View {
-    @Binding var createNewVMPresented: Bool
+    @EnvironmentObject private var data: UTMData
     @Environment(\.openURL) private var openURL
     
     var body: some View {
@@ -32,7 +32,7 @@ struct VMPlaceholderView: View {
             HStack {
                 Spacer()
                 TileButton(titleKey: "Create a New Virtual Machine", systemImage: "plus.circle") {
-                    createNewVMPresented.toggle()
+                    data.newVM()
                 }
                 TileButton(titleKey: "Browse UTM Gallery", systemImage: "square.grid.3x2") {
                     openURL(URL(string: "https://getutm.app/gallery/")!)
@@ -67,9 +67,15 @@ private struct TileButton: View {
 
 @available(iOS 14, macOS 11, *)
 private struct TileButtonStyle: ButtonStyle {
-    let defaultColor = Color(red: 220.0/255.0, green: 220.0/255.0, blue: 220.0/255.0)
-    let pressedColor = Color(red: 200.0/255.0, green: 200.0/255.0, blue: 200.0/255.0)
-    let foregroundColor = Color(red: 126.0/255.0, green: 126.0/255.0, blue: 126.0/255.0)
+    #if os(macOS)
+    let defaultColor = Color(NSColor.controlBackgroundColor)
+    let pressedColor = Color(NSColor.selectedContentBackgroundColor)
+    let foregroundColor = Color(NSColor.secondaryLabelColor)
+    #else
+    let defaultColor = Color(UIColor.secondarySystemBackground)
+    let pressedColor = Color(UIColor.systemFill)
+    let foregroundColor = Color(UIColor.secondaryLabel)
+    #endif
     
     func makeBody(configuration: Configuration) -> some View {
         ZStack {
@@ -98,6 +104,6 @@ private struct TileLabelStyle: LabelStyle {
 @available(iOS 14, macOS 11, *)
 struct VMPlaceholderView_Previews: PreviewProvider {
     static var previews: some View {
-        VMPlaceholderView(createNewVMPresented: .constant(false))
+        VMPlaceholderView()
     }
 }

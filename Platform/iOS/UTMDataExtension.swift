@@ -22,6 +22,7 @@ extension UTMData {
         if vm.configuration.displayConsoleOnly {
             let vc = VMDisplayTerminalViewController()
             let webView = WKWebView()
+            webView.isOpaque = false
             vm.delegate = vc
             vc.vm = vm
             vc.webView = webView
@@ -63,5 +64,13 @@ extension UTMData {
         let duration: TimeInterval = 0.3
 
         UIView.transition(with: window, duration: duration, options: options, animations: {}, completion: nil)
+    }
+    
+    func stop(vm: UTMVirtualMachine) throws {
+        if vm.viewState.suspended {
+            guard vm.deleteSaveVM() else {
+                throw NSLocalizedString("Failed to delete saved state.", comment: "UTMDataExtension")
+            }
+        }
     }
 }

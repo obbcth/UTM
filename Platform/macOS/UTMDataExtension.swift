@@ -26,7 +26,7 @@ extension UTMData {
                 window = nil
             }
             if vm.configuration.displayConsoleOnly {
-                // TODO: console mode
+                window = VMDisplayTerminalWindowController(vm: vm, onClose: close)
             } else {
                 window = VMDisplayMetalWindowController(vm: vm, onClose: close)
             }
@@ -37,6 +37,17 @@ extension UTMData {
             unwrappedWindow.window!.makeMain()
         } else {
             logger.critical("Failed to create window controller.")
+        }
+    }
+    
+    func stop(vm: UTMVirtualMachine) throws {
+        guard vm.deleteSaveVM() else {
+            throw NSLocalizedString("Failed to delete saved state.", comment: "UTMDataExtension")
+        }
+        if let window = vmWindows[vm] {
+            DispatchQueue.main.async {
+                window.close()
+            }
         }
     }
 }

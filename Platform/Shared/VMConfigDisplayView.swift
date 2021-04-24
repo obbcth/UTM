@@ -33,6 +33,17 @@ struct VMConfigDisplayView: View {
                     Text("Full Graphics").tag(false)
                     Text("Console Only").tag(true)
                 }.pickerStyle(displayTypePickerStyle)
+                .disabled(UTMConfiguration.supportedDisplayCards(forArchitecture: config.systemArchitecture)?.isEmpty ?? true)
+                .onChange(of: config.displayConsoleOnly) { newConsoleOnly in
+                    if newConsoleOnly {
+                        if config.shareClipboardEnabled {
+                            config.shareClipboardEnabled = false
+                        }
+                        if config.shareDirectoryEnabled {
+                            config.shareDirectoryEnabled = false
+                        }
+                    }
+                }
                 if config.displayConsoleOnly {
                     let fontSizeObserver = Binding<Int> {
                         Int(truncating: config.consoleFontSize ?? 1)
@@ -47,10 +58,9 @@ struct VMConfigDisplayView: View {
                             Stepper(value: fontSizeObserver, in: 1...72) {
                                     Text("Font Size")
                             }
-                            TextField("", value: $config.consoleFontSize, formatter: NumberFormatter())
+                            NumberTextField("", number: $config.consoleFontSize)
                                 .frame(width: 50)
                                 .multilineTextAlignment(.trailing)
-                                .keyboardType(.numberPad)
                         }
                         Toggle(isOn: $config.consoleCursorBlink, label: {
                             Text("Blinking Cursor")
@@ -61,6 +71,10 @@ struct VMConfigDisplayView: View {
                         TextField("stty cols $COLS rows $ROWS\n", text: $config.consoleResizeCommand.bound)
                     }
                 } else {
+                    Section(header: Text("Hardware"), footer: EmptyView().padding(.bottom)) {
+                        VMConfigStringPicker(selection: $config.displayCard, label: Text("Emulated Display Card"), rawValues: UTMConfiguration.supportedDisplayCards(forArchitecture: config.systemArchitecture), displayValues: UTMConfiguration.supportedDisplayCards(forArchitecturePretty: config.systemArchitecture))
+                    }
+                    
                     Section(header: Text("Resolution"), footer: Text("Requires SPICE guest agent tools to be installed. Retina Mode is recommended only if the guest OS supports HiDPI.").padding(.bottom)) {
                         Toggle(isOn: $config.displayFitScreen, label: {
                             Text("Fit To Screen")
@@ -76,7 +90,7 @@ struct VMConfigDisplayView: View {
                     }
                 }
             }
-        }
+        }.disableAutocorrection(true)
     }
 }
 

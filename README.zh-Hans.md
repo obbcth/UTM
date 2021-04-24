@@ -8,14 +8,14 @@ UTM是一个功能齐全的iOS虚拟机。简而言之，它允许你在iPhone�
 
 ![在iPhone上运行UTM的截图](https://kyun.ltyuanfang.cn/tc/2020/08/16/b71e7b3b8d695.png)
 
-## 特性
+## 特征
 
 * 支持30+处理器，包括x86_64、ARM64和RISC-V，这要归功于后端qemu
 * 得益于SPICE，通过准虚拟化实现了快速的本地图形
 * 使用qemu TCG实现基于JIT的加速
-* 前端使用最新最好的api为iOS11+从零开始设计
+* 前端使用最新最好的应用程序接口(API)为iOS11+从零开始设计
 * 直接从设备上创建、管理和运行虚拟机
-* iOS11-13不需要越狱!（iOS 14+需要）
+* iOS11.0~14.3不需要越狱!（iOS 14.4+需要）
 
 ## 安装
 
@@ -23,7 +23,7 @@ UTM是一个功能齐全的iOS虚拟机。简而言之，它允许你在iPhone�
 
 ## 编译(iOS)
 
-要在ios14上运行UTM而不越狱（以及在任何iOS版本上开发UTM），必须附加Xcode调试器。
+要在iOS14上运行UTM而不越狱（以及在任何iOS版本上开发UTM），必须附加Xcode调试器。
 
 ### 简单的
 
@@ -33,7 +33,7 @@ UTM是一个功能齐全的iOS虚拟机。简而言之，它允许你在iPhone�
 
 如果您想自己构建依赖项，强烈建议您从一个全新的macOS VM开始。这是因为一些依赖项尽管架构并不匹配，仍试图使用`/usr/local/lib`。某些已安装的库如`libusb`和`gawk`将破坏构建。
 1. 使用`brew`安装Xcode命令行和以下构建条件
-`brew install bison pkg-config gettext glib libgpg-error nasm`
+`brew install bison pkg-config gettext glib libgpg-error nasm make meson`
 并且请确保将“bison”添加到您的“$PATH”环境中!
 2. 如果你还没有clone子模块，运行以下命令
 `git submodule update --init --recursive` 
@@ -66,15 +66,15 @@ UTM是一个功能齐全的iOS虚拟机。简而言之，它允许你在iPhone�
 如果你想要给一个` xcarchive `签名，例如从[Github Actions][1]中编译Build，你可以使用以下命令:
 
 ```
-./scripts/resign.sh UTM.xcarchive outputPath PROFILE_NAME TEAM_ID
+./scripts/package.sh signedipa UTM.xcarchive outputPath PROFILE_NAME TEAM_ID
 ```
 
-其中`PROFILE_NAME`是配置文件的名称，而`TEAM_ID`是配置文件中团队名称旁边的标识符。确保签名密钥已被导入到您的密钥链中，并且配置文件已安装在您的iOS设备上。
+其中`PROFILE_NAME`是配置文件的名称，而`TEAM_ID`是配置文件中结构名称旁边的标识符。确保签名密钥已被导入到您的密钥链中，并且配置文件已安装在您的iOS设备上。
 
 如果你有一个越狱的设备，你也可以伪造签名(安装了“ldid”插件):
 
 ```
-./scripts/resign.sh UTM.xcarchive outputPath
+./scripts/package.sh ipa UTM.xcarchive outputPath
 ```
 ## UTM使用注意事项
 
@@ -84,7 +84,7 @@ UTM是一个功能齐全的iOS虚拟机。简而言之，它允许你在iPhone�
 
 ## 为什么UTM不在App Store中?
 
-苹果不允许任何解释或生成代码的应用程序在AppStore中上架，因此UTM不太可能被允许上架。然而，人们在互联网上有各种各样的方式来获得不需要越狱就能下载的应用程序。我们支持这些方法中的任何一种。
+苹果不允许大部分解释或生成代码的应用程序在App Store中上架，因此UTM不太可能被允许上架。然而，人们在互联网上有各种各样的方式来获得不需要越狱就能下载的应用程序。我们支持这些方法中的任何一种。
 
 ## 许可
 

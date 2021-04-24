@@ -15,9 +15,6 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 set -e
 
-# Include URL list
-source "$(dirname $0)/sources"
-
 # Printing coloured lines
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -76,6 +73,7 @@ download () {
     TARGET="$BUILD_DIR/$FILE"
     DIR="$BUILD_DIR/$NAME"
     PATCH="$PATCHES_DIR/${NAME}.patch"
+    DATA="$PATCHES_DIR/data/${NAME}"
     if [ -f "$TARGET" -a -z "$REDOWNLOAD" ]; then
         echo "${GREEN}$TARGET already downloaded! Run with -d to force re-download.${NC}"
     else
@@ -92,6 +90,10 @@ download () {
     if [ -f "$PATCH" ]; then
         echo "${GREEN}Patching ${NAME}...${NC}"
         patch -d "$DIR" -p1 < "$PATCH"
+    fi
+    if [ -d "$DATA" ]; then
+        echo "${GREEN}Patching data ${NAME}...${NC}"
+        cp -r "$DATA/" "$DIR"
     fi
 }
 
@@ -132,7 +134,7 @@ build_openssl() {
     TOOLCHAIN_PATH="$(dirname $(xcrun --sdk $SDK -find clang))"
     PATH="$PATH:$TOOLCHAIN_PATH"
     CROSS_TOP="$(xcrun --sdk $SDK --show-sdk-platform-path)/Developer" # for openssl
-    CROSS_SDK="$SDKNAME.$SDKVERSION.sdk" # for openssl
+    CROSS_SDK="$SDKNAME$SDKVERSION.sdk" # for openssl
     export CROSS_TOP
     export CROSS_SDK
     export PATH
@@ -150,6 +152,38 @@ build_openssl() {
         OPENSSL_CROSS=darwin64-x86_64-cc
         ;;
     esac
+    case $PLATFORM in
+    ios )
+        case $ARCH in
+        armv7 | armv7s )
+            OPENSSL_CROSS=iphoneos-cross
+            ;;
+        arm64 )
+            OPENSSL_CROSS=ios64-cross
+            ;;
+        i386 | x86_64 )
+            OPENSSL_CROSS=iossimulator64-cross
+            ;;
+        esac
+        ;;
+    macos )
+        case $ARCH in
+        arm64 )
+            OPENSSL_CROSS=darwin64-arm64-cc
+            ;;
+        i386 )
+            OPENSSL_CROSS=darwin-i386-cc
+            ;;
+        x86_64 )
+            OPENSSL_CROSS=darwin64-x86_64-cc
+            ;;
+        esac
+        ;;
+    esac
+    if [ -z "$OPENSSL_CROSS" ]; then
+        echo "${RED}Unsupported configuration for OpenSSL $PLATFORM, $ARCH${NC}"
+        exit 1
+    fi
 
     cd "$DIR"
     if [ -z "$REBUILD" ]; then
@@ -213,7 +247,7 @@ build_qemu () {
     pwd="$(pwd)"
     cd "$QEMU_DIR"
     echo "${GREEN}Configuring QEMU...${NC}"
-    ./configure --prefix="$PREFIX" --host="$CHOST" --with-coroutine=libucontext $@
+    ./configure --prefix="$PREFIX" --host="$CHOST" --cross-prefix="" --with-coroutine=libucontext $@
     echo "${GREEN}Building QEMU...${NC}"
     gmake "$MAKEFLAGS"
     echo "${GREEN}Installing QEMU...${NC}"
@@ -227,7 +261,7 @@ build_qemu () {
 
 steal_libucontext () {
     # HACK: use the libucontext built by qemu
-    cp "$QEMU_DIR/libucontext/libucontext.a" "$PREFIX/lib/libucontext.a"
+    cp "$QEMU_DIR/build/libucontext.a" "$PREFIX/lib/libucontext.a"
     cp "$QEMU_DIR/libucontext/include/libucontext.h" "$PREFIX/include/libucontext.h"
 }
 
@@ -251,21 +285,21 @@ fixup () {
     if [ -z "$BASEFILEEXT" ]; then
         NEWFILENAME="$BASE"
     fi
-    LIST=$(otool -L "$FILE" | tail -n +3 | cut -d ' ' -f 1 | awk '{$1=$1};1')
+    LIST=$(otool -L "$FILE" | tail -n +2 | cut -d ' ' -f 1 | awk '{$1=$1};1')
     OLDIFS=$IFS
     IFS=$'\n'
     echo "${GREEN}Fixing up $FILE...${NC}"
     newname="@rpath/$NEWFILENAME"
     install_name_tool -id "$newname" "$FILE"
-    for f in $LIST
+    for g in $LIST
     do
-        base=$(basename "$f")
+        base=$(basename "$g")
         basefilename=${base%.*}
         basefileext=${base:${#basefilename}}
-        dir=$(dirname "$f")
+        dir=$(dirname "$g")
         if [ "$dir" == "$PREFIX/lib" ]; then
             newname="@rpath/$basefilename.utm$basefileext"
-            install_name_tool -change "$f" "$newname" "$FILE"
+            install_name_tool -change "$g" "$newname" "$FILE"
         fi
     done
     mv "$FILE" "$(dirname "$FILE")/$NEWFILENAME"
@@ -276,11 +310,6 @@ fixup_all () {
     OLDIFS=$IFS
     IFS=$'\n'
     FILES=$(find "$SYSROOT_DIR/lib" -type f -name "*.dylib")
-    for f in $FILES
-    do
-        fixup $f
-    done
-    FILES=$(find "$SYSROOT_DIR/bin" -type f -name "qemu-*")
     for f in $FILES
     do
         fixup $f
@@ -348,19 +377,20 @@ fi
 if [ -z "$CHOST" ]; then
     case $ARCH in
     armv7 | armv7s )
-        CHOST=arm-apple-darwin
+        CPU=arm
         ;;
     arm64 )
-        CHOST=aarch64-apple-darwin
+        CPU=aarch64
         ;;
     i386 | x86_64 )
-        CHOST=$ARCH-apple-darwin
+        CPU=$ARCH
         ;;
     * )
         usage
         ;;
     esac
 fi
+CHOST=$CPU-apple-darwin
 export CHOST
 
 case $PLATFORM in
@@ -378,8 +408,9 @@ ios )
         CFLAGS_MINVER="-mios-simulator-version-min=$SDKMINVER"
         ;;
     esac
+    CFLAGS_TARGET=
     PLATFORM_FAMILY_NAME="iOS"
-    QEMU_PLATFORM_BUILD_FLAGS="--enable-shared-lib"
+    QEMU_PLATFORM_BUILD_FLAGS="--enable-shared-lib --disable-hvf --disable-cocoa --disable-curl"
     ;;
 macos )
     if [ -z "$SDKMINVER" ]; then
@@ -387,8 +418,9 @@ macos )
     fi
     SDK=macosx
     CFLAGS_MINVER="-mmacos-version-min=$SDKMINVER"
+    CFLAGS_TARGET="-target $ARCH-apple-macos"
     PLATFORM_FAMILY_NAME="macOS"
-    QEMU_PLATFORM_BUILD_FLAGS="--disable-cocoa"
+    QEMU_PLATFORM_BUILD_FLAGS="--enable-shared-lib --disable-cocoa --disable-curl --cpu=$CPU"
     ;;
 * )
     usage
@@ -403,6 +435,9 @@ BUILD_DIR="build-$PLATFORM_FAMILY_NAME-$ARCH"
 SYSROOT_DIR="sysroot-$PLATFORM_FAMILY_NAME-$ARCH"
 PATCHES_DIR="$BASEDIR/../patches"
 
+# Include URL list
+source "$PATCHES_DIR/sources"
+
 if [ -z "$QEMU_DIR" ]; then
     FILE="$(basename $QEMU_SRC)"
     QEMU_DIR="$BUILD_DIR/${FILE%.tar.*}"
@@ -415,9 +450,9 @@ fi
 PREFIX="$(realpath "$SYSROOT_DIR")"
 
 # Export supplied SDKVERSION or use system default
+SDKNAME=$(basename $(xcrun --sdk $SDK --show-sdk-platform-path) .platform)
 if [ ! -z "$SDKVERSION" ]; then
-    SDKNAME=$(basename $(xcrun --sdk $SDK --show-sdk-platform-path) .platform)
-    SDKROOT=$(xcrun --sdk $SDK --show-sdk-platform-path)"/Developer/SDKs/$SDKNAME.$SDKVERSION.sdk"
+    SDKROOT=$(xcrun --sdk $SDK --show-sdk-platform-path)"/Developer/SDKs/$SDKNAME$SDKVERSION.sdk"
 else
     SDKVERSION=$(xcrun --sdk $SDK --show-sdk-version) # current version
     SDKROOT=$(xcrun --sdk $SDK --show-sdk-path) # current version
@@ -439,10 +474,10 @@ export LD
 export PREFIX
 
 # Flags
-CFLAGS="$CFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER"
-CPPFLAGS="$CPPFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER"
-CXXFLAGS="$CXXFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER"
-LDFLAGS="$LDFLAGS -arch $ARCH -isysroot $SDKROOT -L$PREFIX/lib $CFLAGS_MINVER"
+CFLAGS="$CFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER $CFLAGS_TARGET"
+CPPFLAGS="$CPPFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER $CFLAGS_TARGET"
+CXXFLAGS="$CXXFLAGS -arch $ARCH -isysroot $SDKROOT -I$PREFIX/include $CFLAGS_MINVER $CFLAGS_TARGET"
+LDFLAGS="$LDFLAGS -arch $ARCH -isysroot $SDKROOT -L$PREFIX/lib $CFLAGS_MINVER $CFLAGS_TARGET"
 MAKEFLAGS="-j$NCPU"
 PKG_CONFIG_PATH="$PKG_CONFIG_PATH":"$SDKROOT/usr/lib/pkgconfig":"$PREFIX/lib/pkgconfig":"$PREFIX/share/pkgconfig"
 PKG_CONFIG_LIBDIR=""

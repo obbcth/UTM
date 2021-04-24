@@ -20,7 +20,6 @@ import SwiftUI
 struct VMCardView: View {
     let vm: UTMVirtualMachine
     @EnvironmentObject private var data: UTMData
-    @State private var showSharePopup = false
     
     #if os(macOS)
     let buttonColor: Color = .black
@@ -55,42 +54,6 @@ struct VMCardView: View {
             }
         }.padding([.top, .bottom], 10)
         .buttonStyle(PlainButtonStyle())
-        .contextMenu {
-            Button {
-                data.edit(vm: vm)
-            } label: {
-                Label("Edit", systemImage: "slider.horizontal.3")
-            }
-            Button {
-                data.run(vm: vm)
-            } label: {
-                Label("Run", systemImage: "play.fill")
-            }
-            Button {
-                showSharePopup.toggle()
-            } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
-            }
-            Button {
-                data.busyWork {
-                    try data.clone(vm: vm)
-                }
-            } label: {
-                Label("Clone", systemImage: "doc.on.doc")
-            }
-            Divider()
-            Button {
-                data.busyWork {
-                    try data.delete(vm: vm)
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-                    .foregroundColor(.red)
-            }
-        }
-        .modifier(VMShareFileModifier(isPresented: $showSharePopup) {
-            [vm.path!]
-        })
     }
 }
 

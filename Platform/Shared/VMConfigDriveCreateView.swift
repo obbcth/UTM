@@ -18,34 +18,62 @@ import SwiftUI
 
 @available(iOS 14, macOS 11, *)
 struct VMConfigDriveCreateView: View {
+    private let mibToGib = 1024
+    let target: String?
     let minSizeMib = 1
     
     @ObservedObject var driveImage: VMDriveImage
+    @State private var isGiB: Bool = true
     
     var body: some View {
         Form {
             Toggle(isOn: $driveImage.removable.animation(), label: {
                 Text("Removable")
-            })
+            }).onChange(of: driveImage.removable) { removable in
+                driveImage.reset(forSystemTarget: target, removable: removable)
+            }
+            VMConfigStringPicker(selection: $driveImage.interface, label: Text("Interface"), rawValues: UTMConfiguration.supportedDriveInterfaces(), displayValues: UTMConfiguration.supportedDriveInterfacesPretty())
             if !driveImage.removable {
                 HStack {
                     Text("Size")
                     Spacer()
-                    TextField("Size", value: $driveImage.size, formatter: NumberFormatter(), onCommit: validateSize)
+                    NumberTextField("Size", number: Binding<NSNumber?>(get: {
+                        NSNumber(value: convertToDisplay(fromSizeMib: driveImage.size))
+                    }, set: {
+                        driveImage.size = convertToMib(fromSize: $0?.intValue ?? 0)
+                    }), onEditingChanged: validateSize)
                         .multilineTextAlignment(.trailing)
-                    Text("MB")
+                    Button(action: { isGiB.toggle() }, label: {
+                        Text(isGiB ? "GB" : "MB")
+                            .foregroundColor(.blue)
+                    }).buttonStyle(PlainButtonStyle())
                 }
-            }
-            VMConfigStringPicker(selection: $driveImage.imageTypeString, label: Text("Image Type"), rawValues: UTMConfiguration.supportedImageTypes(), displayValues: UTMConfiguration.supportedImageTypesPretty())
-            if driveImage.imageType == .disk || driveImage.imageType == .CD {
-                VMConfigStringPicker(selection: $driveImage.interface, label: Text("Interface"), rawValues: UTMConfiguration.supportedDriveInterfaces(), displayValues: UTMConfiguration.supportedDriveInterfaces())
             }
         }
     }
     
-    private func validateSize() {
+    private func validateSize(editing: Bool) {
+        guard !editing else {
+            return
+        }
         if driveImage.size < minSizeMib {
             driveImage.size = minSizeMib
+        }
+    }
+    
+    private func convertToMib(fromSize size: Int) -> Int {
+        if isGiB {
+            return size * mibToGib
+        } else {
+            return size
+        }
+    }
+    
+    private func convertToDisplay(fromSizeMib sizeMib: Int) -> Int {
+        if isGiB {
+            return sizeMib / mibToGib
+        } else {
+            return sizeMib
         }
     }
 }
@@ -55,6 +83,6 @@ struct VMConfigDriveCreateView_Previews: PreviewProvider {
     @StateObject static private var driveImage = VMDriveImage()
     
     static var previews: some View {
-        VMConfigDriveCreateView(driveImage: driveImage)
+        VMConfigDriveCreateView(target: nil, driveImage: driveImage)
     }
 }

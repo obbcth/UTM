@@ -15,12 +15,15 @@
 //
 
 #import "UTMConfiguration+Constants.h"
+#import "UTMConfiguration+Defaults.h"
 #import "UTMConfiguration+System.h"
 #import "UTM-Swift.h"
 
 extern const NSString *const kUTMConfigSystemKey;
 
 static const NSString *const kUTMConfigArchitectureKey = @"Architecture";
+static const NSString *const kUTMConfigCPUKey = @"CPU";
+static const NSString *const kUTMConfigCPUFlagsKey = @"CPUFlags";
 static const NSString *const kUTMConfigMemoryKey = @"Memory";
 static const NSString *const kUTMConfigCPUCountKey = @"CPUCount";
 static const NSString *const kUTMConfigTargetKey = @"Target";
@@ -60,6 +63,17 @@ static const NSString *const kUTMConfigMachinePropertiesKey = @"MachinePropertie
         NSInteger index = [bootPretty indexOfObject:self.systemBootDevice];
         self.systemBootDevice = [UTMConfiguration supportedBootDevices][index];
     }
+    // Default CPU
+    if ([self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUKey] length] == 0) {
+        self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUKey] = [UTMConfiguration defaultCPUForTarget:self.systemTarget architecture:self.systemArchitecture];
+    }
+    // Older versions hard codes properties
+    if ([self.version integerValue] < 2) {
+        NSString *machineProp = [UTMConfiguration defaultMachinePropertiesForTarget:self.systemTarget];
+        if (machineProp && self.systemMachineProperties.length == 0) {
+            self.systemMachineProperties = machineProp;
+        }
+    }
 }
 
 #pragma mark - System Properties
@@ -71,6 +85,15 @@ static const NSString *const kUTMConfigMachinePropertiesKey = @"MachinePropertie
 
 - (NSString *)systemArchitecture {
     return self.rootDict[kUTMConfigSystemKey][kUTMConfigArchitectureKey];
+}
+
+- (void)setSystemCPU:(NSString *)systemCPU {
+    [self propertyWillChange];
+    self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUKey] = systemCPU;
+}
+
+- (NSString *)systemCPU {
+    return self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUKey];
 }
 
 - (void)setSystemMemory:(NSNumber *)systemMemory {
@@ -185,6 +208,44 @@ static const NSString *const kUTMConfigMachinePropertiesKey = @"MachinePropertie
 
 - (NSArray *)systemArguments {
     return self.rootDict[kUTMConfigSystemKey][kUTMConfigAddArgsKey];
+}
+
+#pragma mark - CPU Flags
+
+- (NSArray *)systemCPUFlags {
+    return self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUFlagsKey];
+}
+
+- (NSInteger)newCPUFlag:(NSString *)CPUFlag {
+    NSMutableArray<NSString *> *flags = self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUFlagsKey];
+    if (![flags isKindOfClass:[NSMutableArray class]]) {
+        flags = self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUFlagsKey] = [NSMutableArray array];
+    }
+    NSUInteger index = [flags indexOfObjectIdenticalTo:CPUFlag];
+    if (index != NSNotFound) {
+        return (NSInteger)index;
+    }
+    [self propertyWillChange];
+    [flags addObject:CPUFlag];
+    return flags.count - 1;
+}
+
+- (void)removeCPUFlag:(NSString *)CPUFlag {
+    NSMutableArray<NSString *> *flags = self.rootDict[kUTMConfigSystemKey][kUTMConfigCPUFlagsKey];
+    [self propertyWillChange];
+    [flags removeObject:CPUFlag];
+}
+
+#pragma mark - Computed properties
+
+- (BOOL)isTargetArchitectureMatchHost {
+#if defined(__aarch64__)
+    return [self.systemArchitecture isEqualToString:@"aarch64"];
+#elif defined(__x86_64__)
+    return [self.systemArchitecture isEqualToString:@"x86_64"];
+#else
+    return NO;
+#endif
 }
 
 @end

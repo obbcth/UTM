@@ -42,6 +42,8 @@ const NSString *const kUTMViewStateRemovableDrivesPathKey = @"RemovableDrivesPat
     NSMutableDictionary<NSString *, NSData *> *_removableDrivesTemp;
     NSMutableDictionary<NSString *, NSString *> *_removableDrivesPath;
     NSMutableDictionary<NSString *, NSString *> *_removableDrivesPathTemp;
+    BOOL _deleted;
+    BOOL _active;
 }
 
 #pragma mark - Properties
@@ -120,6 +122,24 @@ const NSString *const kUTMViewStateRemovableDrivesPathKey = @"RemovableDrivesPat
 - (void)setSuspended:(BOOL)suspended {
     [self propertyWillChange];
     _rootDict[kUTMViewStateSuspendedKey] = @(suspended);
+}
+
+- (BOOL)deleted {
+    return _deleted;
+}
+
+- (void)setDeleted:(BOOL)deleted {
+    [self propertyWillChange];
+    _deleted = deleted;
+}
+
+- (BOOL)active {
+    return _active;
+}
+
+- (void)setActive:(BOOL)active {
+    [self propertyWillChange];
+    _active = active;
 }
 
 - (NSData *)sharedDirectory {
@@ -218,8 +238,8 @@ const NSString *const kUTMViewStateRemovableDrivesPathKey = @"RemovableDrivesPat
     self = [super init];
     if (self) {
         _rootDict = CFBridgingRelease(CFPropertyListCreateDeepCopy(kCFAllocatorDefault, (__bridge CFDictionaryRef)dictionary, kCFPropertyListMutableContainers));
-        _removableDrives = dictionary[kUTMViewStateRemovableDrivesKey];
-        _removableDrivesPath = dictionary[kUTMViewStateRemovableDrivesPathKey];
+        _removableDrives = _rootDict[kUTMViewStateRemovableDrivesKey];
+        _removableDrivesPath = _rootDict[kUTMViewStateRemovableDrivesPathKey];
         _removableDrivesTemp = [NSMutableDictionary dictionary];
         _removableDrivesPathTemp = [NSMutableDictionary dictionary];
         if (!_removableDrives) {

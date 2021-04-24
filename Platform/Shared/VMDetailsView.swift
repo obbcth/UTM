@@ -37,37 +37,50 @@ struct VMDetailsView: View {
     }
     
     var body: some View {
-        ScrollView {
-            Screenshot(vm: vm, large: regularScreenSizeClass)
-            let notes = vm.configuration.notes ?? ""
-            if regularScreenSizeClass && !notes.isEmpty {
-                HStack(alignment: .top) {
-                    Details(config: vm.configuration, sizeLabel: sizeLabel)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                    Text(notes)
-                        .font(.body)
-                        .padding()
-                        .frame(maxWidth: .infinity)
+        if vm.viewState.deleted {
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Text("This virtual machine has been deleted.")
+                        .font(.headline)
+                    Spacer()
                 }
-                VMRemovableDrivesView(vm: vm)
-                    .padding([.leading, .trailing, .bottom])
-            } else {
-                VStack {
-                    Details(config: vm.configuration, sizeLabel: sizeLabel)
-                    if !notes.isEmpty {
+                Spacer()
+            }
+        } else {
+            ScrollView {
+                Screenshot(vm: vm, large: regularScreenSizeClass)
+                let notes = vm.configuration.notes ?? ""
+                if regularScreenSizeClass && !notes.isEmpty {
+                    HStack(alignment: .top) {
+                        Details(config: vm.configuration, sessionConfig: vm.viewState, sizeLabel: sizeLabel)
+                            .padding()
+                            .frame(maxWidth: .infinity)
                         Text(notes)
                             .font(.body)
+                            .padding()
+                            .frame(maxWidth: .infinity)
                     }
                     VMRemovableDrivesView(vm: vm)
-                }.padding([.leading, .trailing, .bottom])
+                        .padding([.leading, .trailing, .bottom])
+                } else {
+                    VStack {
+                        Details(config: vm.configuration, sessionConfig: vm.viewState, sizeLabel: sizeLabel)
+                        if !notes.isEmpty {
+                            Text(notes)
+                                .font(.body)
+                        }
+                        VMRemovableDrivesView(vm: vm)
+                    }.padding([.leading, .trailing, .bottom])
+                }
+            }.labelStyle(DetailsLabelStyle())
+            .navigationTitle(vm.configuration.name)
+            .modifier(VMToolbarModifier(vm: vm, bottom: !regularScreenSizeClass))
+            .sheet(isPresented: $data.showSettingsModal) {
+                VMSettingsView(vm: vm, config: vm.configuration)
+                    .environmentObject(data)
             }
-        }.labelStyle(DetailsLabelStyle())
-        .navigationTitle(vm.configuration.name)
-        .modifier(VMToolbarModifier(vm: vm, bottom: !regularScreenSizeClass))
-        .sheet(isPresented: $data.showSettingsModal) {
-            VMSettingsView(vm: vm, config: vm.configuration)
-                .environmentObject(data)
         }
     }
 }
@@ -109,37 +122,52 @@ struct Screenshot: View {
 @available(iOS 14, macOS 11, *)
 struct Details: View {
     @ObservedObject var config: UTMConfiguration
+    @ObservedObject var sessionConfig: UTMViewState
     let sizeLabel: String
     @EnvironmentObject private var data: UTMData
     
     var body: some View {
         VStack {
             HStack {
-                Label("Architecture", systemImage: "cpu")
+                plainLabel("Status", systemImage: "info.circle")
+                Spacer()
+                Text(sessionConfig.active ? "Running" : (sessionConfig.suspended ? "Suspended" : "Not running"))
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                plainLabel("Architecture", systemImage: "cpu")
                 Spacer()
                 Text(config.systemArchitecturePretty)
                     .foregroundColor(.secondary)
             }
             HStack {
-                Label("Machine", systemImage: "desktopcomputer")
+                plainLabel("Machine", systemImage: "desktopcomputer")
                 Spacer()
                 Text(config.systemTargetPretty)
                     .foregroundColor(.secondary)
             }
             HStack {
-                Label("Memory", systemImage: "memorychip")
+                plainLabel("Memory", systemImage: "memorychip")
                 Spacer()
                 Text(config.systemMemoryPretty)
                     .foregroundColor(.secondary)
             }
             HStack {
-                Label("Size", systemImage: "internaldrive")
+                plainLabel("Size", systemImage: "internaldrive")
                 Spacer()
                 Text(sizeLabel)
                     .foregroundColor(.secondary)
             }
         }.lineLimit(1)
         .truncationMode(.tail)
+    }
+    
+    private func plainLabel(_ text: String, systemImage: String) -> some View {
+        return Label {
+            Text(text)
+        } icon: {
+            Image(systemName: systemImage).foregroundColor(.primary)
+        }
     }
 }
 

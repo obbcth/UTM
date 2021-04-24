@@ -27,15 +27,15 @@
 + (NSArray<NSString *>*)supportedOptions:(NSString *)key pretty:(BOOL)pretty {
     if ([key isEqualToString:@"networkCards"]) {
         if (pretty) {
-            return [self supportedNetworkCardsPretty];
+            return [self supportedNetworkCardsForArchitecturePretty:@"x86_64"];
         } else {
-            return [self supportedNetworkCards];
+            return [self supportedNetworkCardsForArchitecture:@"x86_64"];
         }
     } else if ([key isEqualToString:@"soundCards"]) {
         if (pretty) {
-            return [self supportedSoundCardDevicesPretty];
+            return [self supportedSoundCardsForArchitecture:@"x86_64"];
         } else {
-            return [self supportedSoundCardDevices];
+            return [self supportedSoundCardsForArchitecture:@"x86_64"];
         }
     } else if ([key isEqualToString:@"architectures"]) {
         if (pretty) {
@@ -67,6 +67,12 @@
         return [self supportedConsoleThemes];
     } else if ([key isEqualToString:@"consoleFonts"]) {
         return [self supportedConsoleFonts];
+    } else if ([key isEqualToString:@"displayCard"]) {
+        if (pretty) {
+            return [self supportedDisplayCardsForArchitecturePretty:@"x86_64"];
+        } else {
+            return [self supportedDisplayCardsForArchitecture:@"x86_64"];
+        }
     }
     return @[];
 }
@@ -89,8 +95,9 @@
 
 + (NSArray<NSString *>*)supportedImageTypesPretty {
     return @[
+             NSLocalizedString(@"None", "UTMConfiguration"),
              NSLocalizedString(@"Disk Image", "UTMConfiguration"),
-             NSLocalizedString(@"CD/DVD Image", "UTMConfiguration"),
+             NSLocalizedString(@"CD/DVD (ISO) Image", "UTMConfiguration"),
              NSLocalizedString(@"BIOS", "UTMConfiguration"),
              NSLocalizedString(@"Linux Kernel", "UTMConfiguration"),
              NSLocalizedString(@"Linux RAM Disk", "UTMConfiguration"),
@@ -100,6 +107,7 @@
 
 + (NSArray<NSString *>*)supportedImageTypes {
     return @[
+             @"none",
              @"disk",
              @"cd",
              @"bios",
@@ -137,7 +145,24 @@
              @"floppy",
              @"pflash",
              @"virtio",
+             @"nvme",
+             @"usb",
              @"none"
+             ];
+}
+
++ (NSArray<NSString *>*)supportedDriveInterfacesPretty {
+    return @[
+             @"IDE",
+             @"SCSI",
+             @"SD Card",
+             @"MTD (NAND/NOR)",
+             @"Floppy",
+             @"PC System Flash",
+             @"VirtIO",
+             @"NVMe",
+             @"USB",
+             @"None (Advanced)"
              ];
 }
 
@@ -183,10 +208,6 @@
 
 + (NSString *)diskImagesDirectory {
     return @"Images";
-}
-
-+ (NSString *)defaultDriveInterface {
-    return [self supportedDriveInterfaces][0];
 }
 
 + (NSString *)debugLogName {

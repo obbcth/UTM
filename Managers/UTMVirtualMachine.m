@@ -21,9 +21,9 @@
 #import "UTMConfiguration.h"
 #import "UTMConfiguration+Constants.h"
 #import "UTMConfiguration+Display.h"
+#import "UTMConfiguration+Drives.h"
 #import "UTMConfiguration+Miscellaneous.h"
 #import "UTMViewState.h"
-#import "UTMQemuImg.h"
 #import "UTMQemuManager.h"
 #import "UTMQemuSystem.h"
 #import "UTMTerminalIO.h"
@@ -36,7 +36,7 @@
 const int kQMPMaxConnectionTries = 30; // qemu needs to start spice server first
 const int64_t kStopTimeout = (int64_t)30*NSEC_PER_SEC;
 
-NSString *const kUTMErrorDomain = @"com.osy86.utm";
+NSString *const kUTMErrorDomain = @"com.utmapp.utm";
 NSString *const kUTMBundleConfigFilename = @"config.plist";
 NSString *const kUTMBundleExtension = @"utm";
 NSString *const kUTMBundleViewFilename = @"view.plist";
@@ -51,7 +51,7 @@ NSString *const kSuspendSnapshotName = @"suspend";
 @property (nonatomic, readonly) UTMQemuManager *qemu;
 @property (nonatomic, readwrite, nullable) UTMQemuSystem *system;
 @property (nonatomic, readwrite) UTMViewState *viewState;
-@property (nonatomic, weak) UTMLogging *logging;
+@property (nonatomic) UTMLogging *logging;
 @property (nonatomic, readonly, nullable) id<UTMInputOutput> ioService;
 @property (nonatomic, readwrite) BOOL busy;
 @property (nonatomic, readwrite, nullable) UTMScreenshot *screenshot;
@@ -106,7 +106,11 @@ NSString *const kSuspendSnapshotName = @"suspend";
     if (self) {
         _will_quit_sema = dispatch_semaphore_create(0);
         _qemu_exit_sema = dispatch_semaphore_create(0);
+#if TARGET_OS_IPHONE
         self.logging = [UTMLogging sharedInstance];
+#else
+        self.logging = [UTMLogging new];
+#endif
     }
     return self;
 }
@@ -148,6 +152,7 @@ NSString *const kSuspendSnapshotName = @"suspend";
             [self.delegate virtualMachine:self transitionToState:state];
         });
     }
+    self.viewState.active = (state == kVMStarted);
 }
 
 - (NSURL *)packageURLForName:(NSString *)name {
@@ -187,7 +192,6 @@ NSString *const kSuspendSnapshotName = @"suspend";
         if (![fileManager moveItemAtURL:self.configuration.existingPath toURL:url error:&_err]) {
             goto error;
         }
-        self.configuration.existingPath = url;
     }
     // save icon
     if (self.configuration.iconCustom && self.configuration.selectedCustomIconPath) {
@@ -220,6 +224,17 @@ NSString *const kSuspendSnapshotName = @"suspend";
         
         // create images directory
         if ([fileManager fileExistsAtPath:tmpPath.path]) {
+            // delete any orphaned images
+            NSArray<NSString *> *orphans = self.configuration.orphanedDrives;
+            for (NSInteger i = 0; i < orphans.count; i++) {
+                NSURL *orphanPath = [tmpPath URLByAppendingPathComponent:orphans[i]];
+                UTMLog(@"Deleting orphaned image '%@'", orphans[i]);
+                if (![fileManager removeItemAtURL:orphanPath error:&_err]) {
+                    UTMLog(@"Ignoring error deleting orphaned image: %@", _err.localizedDescription);
+                    _err = nil;
+                }
+            }
+            // move remaining drives to VM package
             if (![fileManager moveItemAtURL:tmpPath toURL:dstPath error:&_err]) {
                 goto error;
             }
@@ -229,6 +244,7 @@ NSString *const kSuspendSnapshotName = @"suspend";
             }
         }
     }
+    self.configuration.existingPath = url;
     self.path = url;
     return YES;
 error:
@@ -239,11 +255,15 @@ error:
 }
 
 - (void)errorTriggered:(nullable NSString *)msg {
-    self.viewState.suspended = NO;
-    [self saveViewState];
-    [self quitVM];
-    self.delegate.vmMessage = msg;
-    [self changeState:kVMError];
+    if (self.state != kVMStopped && self.state != kVMError) {
+        self.viewState.suspended = NO;
+        [self saveViewState];
+        [self quitVMForce:true];
+    }
+    if (self.state != kVMError) { // don't stack errors
+        self.delegate.vmMessage = msg;
+        [self changeState:kVMError];
+    }
 }
 
 - (BOOL)startVM {
@@ -261,6 +281,7 @@ error:
     
     if (!self.system) {
         self.system = [[UTMQemuSystem alloc] initWithConfiguration:self.configuration imgPath:self.path];
+        self.system.logging = self.logging;
 #if !TARGET_OS_IPHONE
         [self.system setupXpc];
 #endif
@@ -319,8 +340,12 @@ error:
 }
 
 - (BOOL)quitVM {
+    return [self quitVMForce:false];
+}
+
+- (BOOL)quitVMForce:(BOOL)force {
     @synchronized (self) {
-        if (self.busy || self.state != kVMStarted) {
+        if (!force && (self.busy || self.state != kVMStarted)) {
             return NO; // already stopping
         } else {
             self.busy = YES;
@@ -328,14 +353,16 @@ error:
     }
     self.viewState.suspended = NO;
     [self syncViewState];
-    [self changeState:kVMStopping];
+    if (!force) {
+        [self changeState:kVMStopping];
+    }
     // save view settings early to win exit race
     [self saveViewState];
     
+    _qemu.retries = 0;
     [_qemu vmQuitWithCompletion:nil];
-    if (dispatch_semaphore_wait(_will_quit_sema, dispatch_time(DISPATCH_TIME_NOW, kStopTimeout)) != 0) {
-        // TODO: force shutdown
-        UTMLog(@"Stop operation timeout");
+    if (force || dispatch_semaphore_wait(_will_quit_sema, dispatch_time(DISPATCH_TIME_NOW, kStopTimeout)) != 0) {
+        UTMLog(@"Stop operation timeout or force quit");
     }
     [_qemu disconnect];
     _qemu.delegate = nil;
@@ -343,12 +370,18 @@ error:
     [_ioService disconnect];
     _ioService = nil;
     
-    if (dispatch_semaphore_wait(_qemu_exit_sema, dispatch_time(DISPATCH_TIME_NOW, kStopTimeout)) != 0) {
-        // TODO: force shutdown
-        UTMLog(@"Exit operation timeout");
+    if (force || dispatch_semaphore_wait(_qemu_exit_sema, dispatch_time(DISPATCH_TIME_NOW, kStopTimeout)) != 0) {
+        UTMLog(@"Exit operation timeout or force quit");
     }
-    [[UTMPortAllocator sharedInstance] freePort:self.system.qmpPort];
-    [[UTMPortAllocator sharedInstance] freePort:self.system.spicePort];
+    [self.system stopQemu];
+    if (self.system.qmpPort) {
+        [[UTMPortAllocator sharedInstance] freePort:self.system.qmpPort];
+        self.system.qmpPort = 0;
+    }
+    if (self.system.spicePort) {
+        [[UTMPortAllocator sharedInstance] freePort:self.system.spicePort];
+        self.system.spicePort = 0;
+    }
     self.system = nil;
     [self changeState:kVMStopped];
     // stop logging
@@ -467,24 +500,26 @@ error:
 
 - (BOOL)deleteSaveVM {
     __block BOOL success = YES;
-    dispatch_semaphore_t save_sema = dispatch_semaphore_create(0);
-    [_qemu vmDeleteSaveWithCompletion:^(NSString *result, NSError *err) {
-        UTMLog(@"delete save callback: %@", result);
-        if (err) {
-            UTMLog(@"error: %@", err);
+    if (self.qemu) { // if QEMU is running
+        dispatch_semaphore_t save_sema = dispatch_semaphore_create(0);
+        [_qemu vmDeleteSaveWithCompletion:^(NSString *result, NSError *err) {
+            UTMLog(@"delete save callback: %@", result);
+            if (err) {
+                UTMLog(@"error: %@", err);
+                success = NO;
+            } else if ([result localizedCaseInsensitiveContainsString:@"Error"]) {
+                UTMLog(@"save result: %@", result);
+                success = NO; // error message
+            }
+            dispatch_semaphore_signal(save_sema);
+        } snapshotName:kSuspendSnapshotName];
+        if (dispatch_semaphore_wait(save_sema, dispatch_time(DISPATCH_TIME_NOW, kStopTimeout)) != 0) {
+            UTMLog(@"Delete save operation timeout");
             success = NO;
-        } else if ([result localizedCaseInsensitiveContainsString:@"Error"]) {
-            UTMLog(@"save result: %@", result);
-            success = NO; // error message
+        } else {
+            UTMLog(@"Delete save completed");
         }
-        dispatch_semaphore_signal(save_sema);
-    } snapshotName:kSuspendSnapshotName];
-    if (dispatch_semaphore_wait(save_sema, dispatch_time(DISPATCH_TIME_NOW, kStopTimeout)) != 0) {
-        UTMLog(@"Delete save operation timeout");
-        success = NO;
-    } else {
-        UTMLog(@"Delete save completed");
-    }
+    } // otherwise we mark as deleted
     self.viewState.suspended = NO;
     [self saveViewState];
     return success;
@@ -582,11 +617,23 @@ error:
 // this is called right before we execute qmp_cont so we can setup additional option
 - (void)qemuQmpDidConnect:(UTMQemuManager *)manager {
     UTMLog(@"qemuQmpDidConnect");
-    NSError *err;
-    if (!self.configuration.displayConsoleOnly && ![self startSharedDirectoryWithError:&err]) {
-        UTMLog(@"Ignoring error trying to start shared directory: %@", err);
+    __autoreleasing NSError *err = nil;
+    NSString *errMsg = nil;
+    if (!self.configuration.displayConsoleOnly) {
+        if (![self startSharedDirectoryWithError:&err]) {
+            errMsg = [NSString stringWithFormat:NSLocalizedString(@"Error trying to start shared directory: %@", @"UTMVirtualMachine"), err.localizedDescription];
+            UTMLog(@"%@", errMsg);
+        }
     }
-    [self restoreRemovableDrivesFromBookmarks];
+    if (!err && ![self restoreRemovableDrivesFromBookmarksWithError:&err]) {
+        errMsg = [NSString stringWithFormat:NSLocalizedString(@"Error trying to restore removable drives: %@", @"UTMVirtualMachine"), err.localizedDescription];
+        UTMLog(@"%@", errMsg);
+    }
+    if (errMsg) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+            [self errorTriggered:errMsg];
+        });
+    }
 }
 
 #pragma mark - Plist Handling

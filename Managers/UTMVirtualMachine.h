@@ -22,6 +22,7 @@
 #import "UTMInputOutput.h"
 
 @class UTMConfiguration;
+@class UTMLogging;
 @class UTMQemuManager;
 @class UTMScreenshot;
 
@@ -57,6 +58,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (BOOL)startVM;
 - (BOOL)quitVM;
+- (BOOL)quitVMForce:(BOOL)force NS_SWIFT_NAME(quitVM(force:));
 - (BOOL)resetVM;
 - (BOOL)pauseVM;
 - (BOOL)saveVM;

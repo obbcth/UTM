@@ -27,7 +27,7 @@
 extern NSString *const kUTMErrorDomain;
 
 #if TARGET_OS_IPHONE
-static const NSURLBookmarkCreationOptions kBookmarkCreationOptions = 0;
+static const NSURLBookmarkCreationOptions kBookmarkCreationOptions = NSURLBookmarkCreationMinimalBookmark;
 static const NSURLBookmarkResolutionOptions kBookmarkResolutionOptions = 0;
 #else
 static const NSURLBookmarkCreationOptions kBookmarkCreationOptions = NSURLBookmarkCreationWithSecurityScope;
@@ -38,6 +38,8 @@ static const NSURLBookmarkResolutionOptions kBookmarkResolutionOptions = NSURLBo
 
 @property (nonatomic, readonly, nullable) UTMQemuManager *qemu;
 @property (nonatomic, readonly, nullable) id<UTMInputOutput> ioService;
+
+- (void)saveViewState;
 
 @end
 
@@ -60,15 +62,18 @@ static const NSURLBookmarkResolutionOptions kBookmarkResolutionOptions = NSURLBo
 }
 
 - (BOOL)saveSharedDirectory:(NSURL *)url error:(NSError * _Nullable __autoreleasing *)error {
+    [url startAccessingSecurityScopedResource];
     NSData *bookmark = [url bookmarkDataWithOptions:kBookmarkCreationOptions
                      includingResourceValuesForKeys:nil
                                       relativeToURL:nil
                                               error:error];
+    [url stopAccessingSecurityScopedResource];
     if (!bookmark) {
         return NO;
     } else {
         self.viewState.sharedDirectory = bookmark;
         self.viewState.sharedDirectoryPath = url.path;
+        [self saveViewState];
         return YES;
     }
 }
@@ -89,6 +94,7 @@ static const NSURLBookmarkResolutionOptions kBookmarkResolutionOptions = NSURLBo
 - (void)clearSharedDirectory {
     self.viewState.sharedDirectory = nil;
     self.viewState.sharedDirectoryPath = nil;
+    [self saveViewState];
 }
 
 - (BOOL)startSharedDirectoryWithError:(NSError * _Nullable __autoreleasing *)error {
@@ -107,12 +113,14 @@ static const NSURLBookmarkResolutionOptions kBookmarkResolutionOptions = NSURLBo
     }
     
     NSData *bookmark = nil;
+    BOOL legacy = NO;
     if (self.viewState.sharedDirectory) {
         UTMLog(@"found shared directory bookmark");
         bookmark = self.viewState.sharedDirectory;
     } else if (self.configuration.shareDirectoryBookmark) {
         UTMLog(@"found shared directory bookmark (legacy)");
         bookmark = self.configuration.shareDirectoryBookmark;
+        legacy = YES;
     }
     if (bookmark) {
         BOOL stale;
@@ -122,11 +130,18 @@ static const NSURLBookmarkResolutionOptions kBookmarkResolutionOptions = NSURLBo
                                         bookmarkDataIsStale:&stale
                                                       error:error];
         if (shareURL) {
-            [spiceIO changeSharedDirectory:shareURL];
+            BOOL success = YES;
             if (stale) {
                 UTMLog(@"stale bookmark, attempting to recreate");
-                return [self saveSharedDirectory:shareURL error:error];
+                success = [self saveSharedDirectory:shareURL error:error];
             }
+            if (success) {
+                [spiceIO changeSharedDirectory:shareURL];
+            }
+            return success;
+        } else if (legacy) { // ignore errors for legacy sharing since we don't have a good way of handling it
+            UTMLog(@"Ignoring error on legacy shared directory");
+            return YES;
         } else {
             return NO;
         }

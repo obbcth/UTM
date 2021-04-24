@@ -35,9 +35,14 @@ struct VMConfigDrivesView: View {
                 Button(action: { newDrivePopover.toggle() }, label: {
                     Label("New Drive", systemImage: "plus").labelStyle(TitleOnlyLabelStyle())
                 })
+                .onChange(of: newDrivePopover, perform: { showPopover in
+                    if showPopover {
+                        newDrive.reset(forSystemTarget: config.systemTarget, removable: false)
+                    }
+                })
                 .popover(isPresented: $newDrivePopover, arrowEdge: .bottom) {
                     VStack {
-                        VMConfigDriveCreateView(driveImage: newDrive)
+                        VMConfigDriveCreateView(target: config.systemTarget, driveImage: newDrive)
                         HStack {
                             Spacer()
                             Button(action: { addNewDrive(newDrive) }, label: {
@@ -68,7 +73,7 @@ struct VMConfigDrivesView: View {
         data.busyWork {
             switch result {
             case .success(let url):
-                try data.importDrive(url, forConfig: config)
+                try data.importDrive(url, for: config)
                 break
             case .failure(let err):
                 throw err
@@ -79,7 +84,7 @@ struct VMConfigDrivesView: View {
     private func addNewDrive(_ newDrive: VMDriveImage) {
         newDrivePopover = false // hide popover
         data.busyWork {
-            try data.createDrive(newDrive, forConfig: config)
+            try data.createDrive(newDrive, for: config)
         }
     }
 }
@@ -116,7 +121,7 @@ struct DriveCard: View {
     
     func deleteDrive() {
         data.busyWork {
-            try data.removeDrive(at: index, forConfig: config)
+            try data.removeDrive(at: index, for: config)
         }
     }
     
@@ -143,7 +148,7 @@ struct VMConfigDrivesView_Previews: PreviewProvider {
         }.onAppear {
             if config.countDrives == 0 {
                 config.newDrive("test.img", type: .disk, interface: "ide")
-                config.newDrive("bios.bin", type: .BIOS, interface: UTMConfiguration.defaultDriveInterface())
+                config.newDrive("bios.bin", type: .BIOS, interface: "none")
             }
         }
     }

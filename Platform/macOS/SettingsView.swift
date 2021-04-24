@@ -20,7 +20,8 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("AlwaysNativeResolution") var isAlwaysNativeResolution = false
     @AppStorage("DisplayFixed") var isVMDisplayFixed = false
-    @AppStorage("UseHypervisor") var isHypervisorUsed = false
+    @AppStorage("NoHypervisor") var isNoHypervisor = false
+    @AppStorage("CtrlRightClick") var isCtrlRightClick = false
     
     var body: some View {
         Form {
@@ -33,8 +34,13 @@ struct SettingsView: View {
                 })
             }
             Section(header: Text("Acceleration")) {
-                Toggle(isOn: $isHypervisorUsed, label: {
-                    Text("Try to use hardware hypervisor when available")
+                Toggle(isOn: $isNoHypervisor, label: {
+                    Text("Force slower emulation even when hypervisor is available")
+                })
+            }
+            Section(header: Text("Input")) {
+                Toggle(isOn: $isCtrlRightClick, label: {
+                    Text("Hold Control (⌃) for right click")
                 })
             }
         }.padding()
@@ -45,7 +51,8 @@ extension UserDefaults {
     @objc dynamic var NoCursorCaptureAlert: Bool { false }
     @objc dynamic var AlwaysNativeResolution: Bool { false }
     @objc dynamic var DisplayFixed: Bool { false }
-    @objc dynamic var UseHypervisor: Bool { false }
+    @objc dynamic var NoHypervisor: Bool { false }
+    @objc dynamic var CtrlRightClick: Bool { false }
 }
 
 @available(macOS 11, *)

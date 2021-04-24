@@ -23,6 +23,7 @@ extern const NSString *const kUTMConfigNetworkingKey;
 static const NSString *const kUTMConfigNetworkEnabledKey = @"NetworkEnabled";
 static const NSString *const kUTMConfigNetworkIsolateGuestKey = @"IsolateGuest";
 static const NSString *const kUTMConfigNetworkCardKey = @"NetworkCard";
+static const NSString *const kUTMConfigNetworkCardMacKey = @"NetworkCardMAC";
 static const NSString *const kUTMConfigNetworkIPSubnetKey = @"IPSubnet";
 static const NSString *const kUTMConfigNetworkIPv6SubnetKey = @"IPv6Subnet";
 static const NSString *const kUTMConfigNetworkIPHostKey = @"IPHost";
@@ -56,6 +57,24 @@ static const NSString *const kUTMConfigNetworkPortForwardGuestPortKey = @"GuestP
     if (!self.rootDict[kUTMConfigNetworkingKey][kUTMConfigNetworkCardKey]) {
         self.networkCard = @"rtl8139";
     }
+    // Generate MAC if missing
+    if (!self.networkCardMac) {
+        self.networkCardMac = [self generateMacAddress];
+    }
+}
+
+#pragma mark - Generate MAC
+
+- (NSString *)generateMacAddress {
+    uint8_t bytes[6];
+    
+    for (int i = 0; i < 6; i++) {
+        bytes[i] = arc4random() % 256;
+    }
+    // byte 0 should be local
+    bytes[0] = (bytes[0] & 0xFC) | 0x2;
+    
+    return [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]];
 }
 
 #pragma mark - Network settings
@@ -85,6 +104,15 @@ static const NSString *const kUTMConfigNetworkPortForwardGuestPortKey = @"GuestP
 
 - (NSString *)networkCard {
     return self.rootDict[kUTMConfigNetworkingKey][kUTMConfigNetworkCardKey];
+}
+
+- (void)setNetworkCardMac:(NSString *)networkCardMac {
+    [self propertyWillChange];
+    self.rootDict[kUTMConfigNetworkingKey][kUTMConfigNetworkCardMacKey] = networkCardMac;
+}
+
+- (NSString *)networkCardMac {
+    return self.rootDict[kUTMConfigNetworkingKey][kUTMConfigNetworkCardMacKey];
 }
 
 - (void)setNetworkAddress:(NSString *)networkAddress {
@@ -196,9 +224,9 @@ static const NSString *const kUTMConfigNetworkPortForwardGuestPortKey = @"GuestP
         portForward = [[UTMConfigurationPortForward alloc] init];
         portForward.protocol = dict[kUTMConfigNetworkPortForwardProtocolKey];
         portForward.hostAddress = dict[kUTMConfigNetworkPortForwardHostAddressKey];
-        portForward.hostPort = [dict[kUTMConfigNetworkPortForwardHostPortKey] integerValue];
+        portForward.hostPort = dict[kUTMConfigNetworkPortForwardHostPortKey];
         portForward.guestAddress = dict[kUTMConfigNetworkPortForwardGuestAddressKey];
-        portForward.guestPort = [dict[kUTMConfigNetworkPortForwardGuestPortKey] integerValue];
+        portForward.guestPort = dict[kUTMConfigNetworkPortForwardGuestPortKey];
     }
     return portForward;
 }
@@ -210,9 +238,9 @@ static const NSString *const kUTMConfigNetworkPortForwardGuestPortKey = @"GuestP
     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
     dict[kUTMConfigNetworkPortForwardProtocolKey] = argument.protocol;
     dict[kUTMConfigNetworkPortForwardHostAddressKey] = argument.hostAddress;
-    dict[kUTMConfigNetworkPortForwardHostPortKey] = @(argument.hostPort);
+    dict[kUTMConfigNetworkPortForwardHostPortKey] = argument.hostPort;
     dict[kUTMConfigNetworkPortForwardGuestAddressKey] = argument.guestAddress;
-    dict[kUTMConfigNetworkPortForwardGuestPortKey] = @(argument.guestPort);
+    dict[kUTMConfigNetworkPortForwardGuestPortKey] = argument.guestPort;
     [self propertyWillChange];
     self.rootDict[kUTMConfigNetworkingKey][kUTMConfigNetworkPortForwardKey][index] = dict;
 }

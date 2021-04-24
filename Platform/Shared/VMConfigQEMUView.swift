@@ -21,6 +21,7 @@ struct VMConfigQEMUView: View {
     @ObservedObject var config: UTMConfiguration
     @State private var newArg: String = ""
     @State private var showExportLog: Bool = false
+    @State private var showExportArgs: Bool = false
     @EnvironmentObject private var data: UTMData
     
     private var logExists: Bool {
@@ -40,14 +41,17 @@ struct VMConfigQEMUView: View {
                     })
                     Button("Export Debug Log") {
                         showExportLog.toggle()
-                    }.modifier(VMShareFileModifier(isPresented: $showExportLog, files: exportDebugLog))
+                    }.modifier(VMShareItemModifier(isPresented: $showExportLog, items: exportDebugLog))
                     .disabled(!logExists)
                 }
                 Section(header: Text("QEMU Arguments")) {
+                    Button("Export QEMU Command") {
+                        showExportArgs.toggle()
+                    }.modifier(VMShareItemModifier(isPresented: $showExportArgs, items: exportArgs))
                     Toggle(isOn: $config.ignoreAllConfiguration.animation(), label: {
                         Text("Advanced: Bypass configuration and manually specify arguments")
                     })
-                    let qemuSystem = UTMQemuSystem(configuration: config, imgPath: URL(fileURLWithPath: "/path/to/Images"))
+                    let qemuSystem = UTMQemuSystem(configuration: config, imgPath: URL(fileURLWithPath: "Images"))
                     let fixedArgs = qemuSystem.argv
                     #if os(macOS)
                     VStack {
@@ -55,7 +59,7 @@ struct VMConfigQEMUView: View {
                             TextField("", text: .constant(arg))
                         }.disabled(true)
                         CustomArguments(config: config)
-                        TextField("New...", text: $newArg, onEditingChanged: {_ in }, onCommit: addArg)
+                        TextField("New...", text: $newArg, onEditingChanged: addArg)
                     }
                     #else
                     List {
@@ -63,11 +67,12 @@ struct VMConfigQEMUView: View {
                             Text(arg)
                         }.foregroundColor(.secondary)
                         CustomArguments(config: config)
-                        TextField("New...", text: $newArg, onEditingChanged: {_ in }, onCommit: addArg)
+                        TextField("New...", text: $newArg, onEditingChanged: addArg)
                     }
                     #endif
                 }
             }.navigationBarItems(trailing: EditButton())
+            .disableAutocorrection(true)
         }
     }
     
@@ -91,11 +96,29 @@ struct VMConfigQEMUView: View {
         }
     }
     
-    private func addArg() {
+    private func addArg(editing: Bool) {
+        guard !editing else {
+            return
+        }
         if newArg != "" {
             config.newArgument(newArg)
         }
         newArg = ""
+    }
+    
+    private func exportArgs() -> [String] {
+        let existingPath = config.existingPath ?? URL(fileURLWithPath: "Images")
+        let qemuSystem = UTMQemuSystem(configuration: config, imgPath: existingPath)
+        qemuSystem.updateArgv(withUserOptions: true)
+        var argString = "qemu-system-\(config.systemArchitecture ?? "unknown")"
+        for arg in qemuSystem.argv {
+            if arg.contains(" ") {
+                argString += " \"\(arg)\""
+            } else {
+                argString += " \(arg)"
+            }
+        }
+        return [argString]
     }
 }
 
@@ -116,8 +139,8 @@ struct CustomArguments: View {
                 config.updateArgument(at: i, withValue: $0)
             }
             HStack {
-                TextField("Argument", text: argBinding, onCommit: {
-                    if argBinding.wrappedValue == "" {
+                TextField("Argument", text: argBinding, onEditingChanged: { editing in
+                    if !editing && argBinding.wrappedValue == "" {
                         config.removeArgument(at: i)
                     }
                 })

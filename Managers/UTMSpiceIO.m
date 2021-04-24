@@ -39,6 +39,8 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 @property (nonatomic, nullable) CSSession *session;
 @property (nonatomic, nullable, copy) NSURL *sharedDirectory;
 @property (nonatomic) NSInteger port;
+@property (nonatomic) BOOL hasObservers;
+@property (nonatomic) BOOL dynamicResolutionSupported;
 
 @end
 
@@ -53,25 +55,24 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
     return self;
 }
 
-- (void)setDelegate:(id<UTMSpiceIODelegate>)delegate {
-    _delegate = delegate;
-    _delegate.vmDisplay = self.primaryDisplay;
-    _delegate.vmInput = self.primaryInput;
+- (void)dealloc {
+    [self disconnect];
 }
 
 - (void)initializeSpiceIfNeeded {
-    if (!self.spice) {
-        self.spice = [[CSMain alloc] init];
+    @synchronized (self) {
+        if (!self.spice) {
+            self.spice = [CSMain sharedInstance];
+        }
+        
+        if (!self.spiceConnection) {
+            self.spiceConnection = [[CSConnection alloc] initWithHost:@"127.0.0.1" port:[NSString stringWithFormat:@"%lu", self.port]];
+            self.spiceConnection.delegate = self;
+            self.spiceConnection.audioEnabled = _configuration.soundEnabled;
+        }
+        
+        self.spiceConnection.glibMainContext = self.spice.glibMainContext;
     }
-    
-    if (!self.spiceConnection) {
-        self.spiceConnection = [[CSConnection alloc] initWithHost:@"127.0.0.1" port:[NSString stringWithFormat:@"%lu", self.port]];
-        self.spiceConnection.delegate = self;
-        self.spiceConnection.audioEnabled = _configuration.soundEnabled;
-    }
-    
-    self.spiceConnection.glibMainContext = self.spice.glibMainContext;
-    [self.spice spiceSetDebug:YES];
     _primaryDisplay = nil;
     _primaryInput = nil;
     _delegate.vmDisplay = nil;
@@ -79,7 +80,9 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 }
 
 - (BOOL)isSpiceInitialized {
-    return self.spice != nil && self.spiceConnection != nil;
+    @synchronized (self) {
+        return self.spice != nil && self.spiceConnection != nil;
+    }
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
@@ -95,9 +98,11 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 
 - (BOOL)startWithError:(NSError **)err {
     [self initializeSpiceIfNeeded];
-    if (![self.spice spiceStart]) {
-        // error
-        return NO;
+    @synchronized (self) {
+        if (![self.spice spiceStart]) {
+            // error
+            return NO;
+        }
     }
     
     return YES;
@@ -108,12 +113,14 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
     __block __weak doConnect_t weakDoConnect;
     __weak UTMSpiceIO *weakSelf = self;
     self.doConnect = ^{
-        if (tries-- > 0) {
+        if (weakSelf && tries-- > 0) {
             if (!isPortAvailable(weakSelf.port)) { // port is in use, try connecting
-                if ([weakSelf.spiceConnection connect]) {
-                    weakSelf.connectionCallback = block;
-                    weakSelf.doConnect = nil;
-                    return;
+                @synchronized (weakSelf) {
+                    if ([weakSelf.spiceConnection connect]) {
+                        weakSelf.connectionCallback = block;
+                        weakSelf.doConnect = nil;
+                        return;
+                    }
                 }
             } else {
                 UTMLog(@"SPICE port not in use yet, retries left: %d", tries);
@@ -121,8 +128,10 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
                 return;
             }
         }
-        // if we get here, error is unrecoverable
-        block(NO, NSLocalizedString(@"Failed to connect to SPICE server.", "UTMSpiceIO"));
+        if (tries == 0) {
+            // if we get here, error is unrecoverable
+            block(NO, NSLocalizedString(@"Failed to connect to SPICE server.", "UTMSpiceIO"));
+        }
         weakSelf.connectionCallback = nil;
         weakSelf.doConnect = nil;
     };
@@ -131,13 +140,18 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 }
 
 - (void)disconnect {
-    [self removeObserver:self forKeyPath:@"primaryDisplay.viewportScale"];
-    [self removeObserver:self forKeyPath:@"primaryDisplay.displaySize"];
-    [self.spiceConnection disconnect];
-    self.spiceConnection.delegate = nil;
-    self.spiceConnection = nil;
-    [self.spice spiceStop];
-    self.spice = nil;
+    @synchronized (self) {
+        if (self.hasObservers) {
+            [self removeObserver:self forKeyPath:@"primaryDisplay.viewportScale"];
+            [self removeObserver:self forKeyPath:@"primaryDisplay.displaySize"];
+            self.hasObservers = NO;
+        }
+        [self.spiceConnection disconnect];
+        self.spiceConnection.delegate = nil;
+        self.spiceConnection = nil;
+        self.spice = nil;
+    }
+    self.doConnect = nil;
 }
 
 - (UTMScreenshot *)screenshot {
@@ -145,7 +159,9 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 }
 
 - (void)setDebugMode:(BOOL)debugMode {
-    [self.spice spiceSetDebug: debugMode];
+    @synchronized (self) {
+        [self.spice spiceSetDebug: debugMode];
+    }
 }
 
 - (void)syncViewState:(UTMViewState *)viewState {
@@ -159,7 +175,11 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 - (void)restoreViewState:(UTMViewState *)viewState {
     self.primaryDisplay.viewportOrigin = CGPointMake(viewState.displayOriginX, viewState.displayOriginY);
     self.primaryDisplay.displaySize = CGSizeMake(viewState.displaySizeWidth, viewState.displaySizeHeight);
-    self.primaryDisplay.viewportScale = viewState.displayScale;
+    if (viewState.displayScale) { // cannot be zero
+        self.primaryDisplay.viewportScale = viewState.displayScale;
+    } else {
+        self.primaryDisplay.viewportScale = 1.0; // default value
+    }
 }
 
 #pragma mark - CSConnectionDelegate
@@ -187,8 +207,11 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
         _primaryInput = input;
         _delegate.vmDisplay = display;
         _delegate.vmInput = input;
-        [self addObserver:self forKeyPath:@"primaryDisplay.viewportScale" options:0 context:nil];
-        [self addObserver:self forKeyPath:@"primaryDisplay.displaySize" options:0 context:nil];
+        @synchronized (self) {
+            [self addObserver:self forKeyPath:@"primaryDisplay.viewportScale" options:0 context:nil];
+            [self addObserver:self forKeyPath:@"primaryDisplay.displaySize" options:0 context:nil];
+            self.hasObservers = YES;
+        }
         if (self.connectionCallback) {
             self.connectionCallback(YES, nil);
             self.connectionCallback = nil;
@@ -211,6 +234,14 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
     self.session = nil;
 }
 
+- (void)spiceAgentConnected:(CSConnection *)connection supportingFeatures:(CSConnectionAgentFeature)features {
+    self.dynamicResolutionSupported = (features & kCSConnectionAgentFeatureMonitorsConfig) != kCSConnectionAgentFeatureNone;
+}
+
+- (void)spiceAgentDisconnected:(CSConnection *)connection {
+    self.dynamicResolutionSupported = NO;
+}
+
 #pragma mark - Shared Directory
 
 - (void)changeSharedDirectory:(NSURL *)url {
@@ -226,15 +257,38 @@ typedef void (^connectionCallback_t)(BOOL success, NSString * _Nullable msg);
 - (void)startSharingDirectory {
     if (self.sharedDirectory) {
         UTMLog(@"setting share directory to %@", self.sharedDirectory.path);
+        [self.sharedDirectory startAccessingSecurityScopedResource];
         [self.session setSharedDirectory:self.sharedDirectory.path readOnly:self.configuration.shareDirectoryReadOnly];
     }
 }
 
 - (void)endSharingDirectory {
     if (self.sharedDirectory) {
+        [self.sharedDirectory stopAccessingSecurityScopedResource];
         self.sharedDirectory = nil;
         UTMLog(@"ended share directory sharing");
     }
+}
+
+#pragma mark - Properties
+
+- (void)setDelegate:(id<UTMSpiceIODelegate>)delegate {
+    _delegate = delegate;
+    _delegate.vmDisplay = self.primaryDisplay;
+    _delegate.vmInput = self.primaryInput;
+    // make sure to send the dynamic resolution change when attached
+    if ([self.delegate respondsToSelector:@selector(dynamicResolutionSupportDidChange:)]) {
+        [self.delegate dynamicResolutionSupportDidChange:self.dynamicResolutionSupported];
+    }
+}
+
+- (void)setDynamicResolutionSupported:(BOOL)dynamicResolutionSupported {
+    if (_dynamicResolutionSupported != dynamicResolutionSupported) {
+        if ([self.delegate respondsToSelector:@selector(dynamicResolutionSupportDidChange:)]) {
+            [self.delegate dynamicResolutionSupportDidChange:dynamicResolutionSupported];
+        }
+    }
+    _dynamicResolutionSupported = dynamicResolutionSupported;
 }
 
 @end

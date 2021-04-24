@@ -204,7 +204,7 @@ class VMMetalView: MTKView {
         logger.debug("modifers: \(modifiers)")
         if modifiers.isSuperset(of: [.option, .control]) {
             logger.debug("release cursor")
-            releaseMouse()
+            inputDelegate?.requestReleaseCapture()
         }
         sendModifiers(lastModifiers.subtracting(modifiers), press: false)
         sendModifiers(modifiers.subtracting(lastModifiers), press: true)
@@ -263,10 +263,22 @@ class VMMetalView: MTKView {
         }
     }
     
+    override func mouseDragged(with event: NSEvent) {
+        mouseMoved(with: event)
+    }
+    
+    override func rightMouseDragged(with event: NSEvent) {
+        mouseMoved(with: event)
+    }
+    
+    override func otherMouseDragged(with event: NSEvent) {
+        mouseMoved(with: event)
+    }
+    
     override func mouseMoved(with event: NSEvent) {
         logger.debug("mouse moved: \(event.deltaX), \(event.deltaY)")
         if isMouseCaptured {
-            inputDelegate?.mouseMove(relativePoint: CGPoint(x: event.deltaX, y: event.deltaY),
+            inputDelegate?.mouseMove(relativePoint: CGPoint(x: event.deltaX, y: -event.deltaY),
                                      button: NSEvent.pressedMouseButtons.inputButtons())
         } else {
             let location = event.locationInWindow
@@ -301,11 +313,13 @@ extension VMMetalView {
         CGAssociateMouseAndMouseCursorPosition(0)
         CGWarpMouseCursorPosition(screenCenter ?? .zero)
         isMouseCaptured = true
+        NSCursor.hide()
     }
     
     func releaseMouse() {
         CGAssociateMouseAndMouseCursorPosition(1)
         isMouseCaptured = false
+        NSCursor.unhide()
     }
 }
 

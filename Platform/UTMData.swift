@@ -32,6 +32,7 @@ struct AlertMessage: Identifiable {
 class UTMData: ObservableObject {
     
     @Published var showSettingsModal: Bool
+    @Published var showNewVMSheet: Bool
     @Published var alertMessage: AlertMessage?
     @Published var busy: Bool
     @Published var selectedVM: UTMVirtualMachine?
@@ -67,6 +68,7 @@ class UTMData: ObservableObject {
     init() {
         let defaults = UserDefaults.standard
         self.showSettingsModal = false
+        self.showNewVMSheet = false
         self.busy = false
         self.virtualMachines = []
         if let files = defaults.array(forKey: "VMList") as? [String] {
@@ -178,6 +180,16 @@ class UTMData: ObservableObject {
     
     func discardChanges(forVM vm: UTMVirtualMachine) throws {
         try vm.reloadConfiguration()
+        // delete orphaned drives
+        guard let orphanedDrives = vm.configuration.orphanedDrives else {
+            return
+        }
+        for name in orphanedDrives {
+            let imagesPath = vm.configuration.imagesPath
+            let orphanPath = imagesPath.appendingPathComponent(name)
+            logger.debug("Removing orphaned drive '\(name)'")
+            try fileManager.removeItem(at: orphanPath)
+        }
     }
     
     func create(config: UTMConfiguration) throws {
@@ -204,6 +216,7 @@ class UTMData: ObservableObject {
             if vm == self.selectedVM {
                 self.selectedVM = nil
             }
+            vm.viewState.deleted = true // alert views to update
         }
     }
     
@@ -221,10 +234,20 @@ class UTMData: ObservableObject {
         }
     }
     
+    func newVM() {
+        DispatchQueue.main.async {
+            self.showSettingsModal = false
+            self.showNewVMSheet = true
+        }
+    }
+    
     func edit(vm: UTMVirtualMachine) {
         DispatchQueue.main.async {
+            // show orphans for proper removal
+            vm.configuration.recoverOrphanedDrives()
             self.selectedVM = vm
             self.showSettingsModal = true
+            self.showNewVMSheet = false
         }
     }
     
@@ -280,6 +303,9 @@ class UTMData: ObservableObject {
     }
     
     func importUTM(url: URL) throws {
+        _ = url.startAccessingSecurityScopedResource()
+        defer { url.stopAccessingSecurityScopedResource() }
+        
         logger.info("importing: \(url)")
         let fileBasePath = url.deletingLastPathComponent()
         let fileName = url.lastPathComponent
@@ -309,9 +335,22 @@ class UTMData: ObservableObject {
     
     // MARK: - Disk drive functions
     
-    func importDrive(_ drive: URL, forConfig: UTMConfiguration, copy: Bool = true) throws {
+    func importDrive(_ drive: URL, for config: UTMConfiguration, copy: Bool = true) throws {
+        _ = drive.startAccessingSecurityScopedResource()
+        defer { drive.stopAccessingSecurityScopedResource() }
+        
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: drive.path, isDirectory: &isDir), !isDir.boolValue else {
+            if drive.pathExtension == "utm" {
+                throw NSLocalizedString("You cannot import a .utm package as a drive. Did you mean to open the package with UTM?", comment: "UTMData")
+            } else {
+                throw NSLocalizedString("You cannot import a directory as a drive.", comment: "UTMData")
+            }
+        }
+        
         let name = drive.lastPathComponent
-        let imagesPath = forConfig.imagesPath
+        let imageType: UTMDiskImageType = drive.pathExtension.lowercased() == "iso" ? .CD : .disk
+        let imagesPath = config.imagesPath
         let dstPath = imagesPath.appendingPathComponent(name)
         if !fileManager.fileExists(atPath: imagesPath.path) {
             try fileManager.createDirectory(at: imagesPath, withIntermediateDirectories: false, attributes: nil)
@@ -322,67 +361,63 @@ class UTMData: ObservableObject {
             try fileManager.moveItem(at: drive, to: dstPath)
         }
         DispatchQueue.main.async {
-            forConfig.newDrive(name, type: .CD, interface: UTMConfiguration.defaultDriveInterface())
+            let interface: String
+            if let target = config.systemTarget {
+                interface = UTMConfiguration.defaultDriveInterface(forTarget: target, type: imageType)
+            } else {
+                interface = "none"
+            }
+            config.newDrive(name, type: imageType, interface: interface)
         }
     }
     
-    func createDrive(_ drive: VMDriveImage, forConfig: UTMConfiguration) throws {
+    func createDrive(_ drive: VMDriveImage, for config: UTMConfiguration) throws {
         var name: String = ""
         if !drive.removable {
             guard drive.size > 0 else {
                 throw NSLocalizedString("Invalid drive size.", comment: "UTMData")
             }
-            name = newDefaultDriveName(type: drive.imageType, forConfig: forConfig)
-            let imagesPath = forConfig.imagesPath
+            name = newDefaultDriveName(type: drive.imageType, forConfig: config)
+            let imagesPath = config.imagesPath
             let dstPath = imagesPath.appendingPathComponent(name)
             if !fileManager.fileExists(atPath: imagesPath.path) {
                 try fileManager.createDirectory(at: imagesPath, withIntermediateDirectories: false, attributes: nil)
             }
             
             // create drive
-            // TODO: implement custom qcow2 creation
-            let sema = DispatchSemaphore(value: 0)
-            let imgCreate = UTMQemuImg()
-            var success = false
-            var msg = ""
-            imgCreate.op = .create
-            imgCreate.outputPath = dstPath
-            imgCreate.sizeMiB = drive.size
-            imgCreate.compressed = true
-            #if os(macOS)
-            imgCreate.setupXpc()
-            #endif
-            imgCreate.start { (_success, _msg) in
-                success = _success
-                msg = _msg
-                sema.signal()
-            }
-            sema.wait()
-            if !success {
-                throw msg
+            if !GenerateDefaultQcow2File(dstPath as CFURL, drive.size) {
+                throw NSLocalizedString("Disk creation failed.", comment: "UTMData")
             }
         }
         
         DispatchQueue.main.async {
-            let interface = drive.interface ?? UTMConfiguration.defaultDriveInterface()
+            let interface = drive.interface ?? "none"
             if drive.removable {
-                forConfig.newRemovableDrive(drive.imageType, interface: interface)
+                config.newRemovableDrive(drive.imageType, interface: interface)
             } else {
-                forConfig.newDrive(name, type: drive.imageType, interface: interface)
+                config.newDrive(name, type: drive.imageType, interface: interface)
             }
         }
     }
     
-    func removeDrive(at: Int, forConfig: UTMConfiguration) throws {
-        let path = forConfig.driveImagePath(for: at)!
-        
-        if fileManager.fileExists(atPath: path) {
-            try fileManager.removeItem(atPath: path)
+    func removeDrive(at index: Int, for config: UTMConfiguration) throws {
+        if let name = config.driveImagePath(for: index) {
+            let path = config.imagesPath.appendingPathComponent(name);
+            if fileManager.fileExists(atPath: path.path) {
+                try fileManager.removeItem(at: path)
+            }
         }
         
         DispatchQueue.main.async {
-            forConfig.removeDrive(at: at)
+            config.removeDrive(at: index)
         }
+    }
+    
+    // MARK: - Networking
+    
+    func enableNetworking() {
+        let task = URLSession.shared.dataTask(with: URL(string: "http://captive.apple.com")!)
+        task.resume()
     }
     
     // MARK: - Helper functions

@@ -426,6 +426,7 @@ static CGFloat CGPointToPixel(CGFloat point) {
 - (IBAction)gesturePinch:(UIPinchGestureRecognizer *)sender {
     // disable pinch if move screen on pan is disabled
     if (self.twoFingerPanType == VMGestureTypeMoveScreen || self.threeFingerPanType == VMGestureTypeMoveScreen) {
+        NSAssert(sender.scale > 0, @"sender.scale cannot be 0");
         self.vmDisplay.viewportScale *= sender.scale;
         sender.scale = 1.0;
     }
@@ -602,9 +603,11 @@ static CGFloat CGPointToPixel(CGFloat point) {
                 }
                 // Apple Pencil 2 right click mode
                 if (@available(iOS 12.1, *)) {
-                    primary = !_pencilForceRightClickOnce;
-                    secondary = _pencilForceRightClickOnce;
-                    _pencilForceRightClickOnce = false;
+                    if (touch.type == UITouchTypePencil) {
+                        primary = !_pencilForceRightClickOnce;
+                        secondary = _pencilForceRightClickOnce;
+                        _pencilForceRightClickOnce = false;
+                    }
                 }
                 [_cursor startMovement:pos];
                 [_cursor updateMovement:pos];
