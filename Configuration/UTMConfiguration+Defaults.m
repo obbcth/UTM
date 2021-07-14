@@ -34,7 +34,12 @@
     self.systemCPU = @"default";
     self.systemTarget = @"q35";
     self.systemMemory = @512;
-    self.systemBootDevice = @"cd";
+    if (@available(iOS 14, *)) {
+        // use bootindex on new UI
+        self.systemBootDevice = @"";
+    } else {
+        self.systemBootDevice = @"cd";
+    }
     self.systemUUID = [[NSUUID UUID] UUIDString];
     self.displayCard = @"qxl-vga";
     self.displayUpscaler = @"linear";
@@ -42,12 +47,21 @@
     self.consoleFont = @"Menlo";
     self.consoleFontSize = @12;
     self.consoleTheme = @"Default";
-    self.networkEnabled = YES;
+#if TARGET_OS_OSX
+    if (@available(macOS 11.3, *)) {
+        self.networkMode = @"shared";
+    } else {
+        self.networkMode = @"emulated";
+    }
+#else
+    self.networkMode = @"emulated";
+#endif
     self.soundEnabled = YES;
     self.soundCard = @"AC97";
     self.networkCard = @"rtl8139";
     self.networkCardMac = [self generateMacAddress];
     self.shareClipboardEnabled = YES;
+    self.usbRedirectionMaximumDevices = @3;
     self.name = [NSUUID UUID].UUIDString;
     self.existingPath = nil;
     self.selectedCustomIconPath = nil;
@@ -58,18 +72,18 @@
         self.soundCard = @"AC97";
         self.soundEnabled = YES;
         self.networkCard = @"rtl8139";
-        self.networkEnabled = YES;
         self.shareClipboardEnabled = YES;
         self.displayCard = @"qxl-vga";
     } else if ([target isEqualToString:@"virt"] || [target hasPrefix:@"virt-"]) {
         self.soundCard = @"intel-hda";
         self.soundEnabled = YES;
         self.networkCard = @"virtio-net-pci";
-        self.networkEnabled = YES;
         self.shareClipboardEnabled = YES;
         self.displayCard = @"virtio-ramfb";
+        self.usb3Support = NO;
     } else if ([target isEqualToString:@"mac99"]) {
-        self.soundEnabled = NO;
+        self.soundCard = @"screamer";
+        self.soundEnabled = YES;
     } else if ([target isEqualToString:@"isapc"]) {
         self.inputLegacy = YES; // no USB support
     }

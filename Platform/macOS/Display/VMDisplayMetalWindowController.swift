@@ -14,20 +14,29 @@
 // limitations under the License.
 //
 
-class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODelegate {
+import Carbon.HIToolbox
+
+class VMDisplayMetalWindowController: VMDisplayWindowController {
     var metalView: VMMetalView!
     var renderer: UTMRenderer?
     
-    @objc dynamic var vmDisplay: CSDisplayMetal?
-    @objc dynamic var vmInput: CSInput?
+    @objc fileprivate weak var vmDisplay: CSDisplayMetal?
+    @objc fileprivate weak var vmInput: CSInput?
+    @objc fileprivate weak var vmUsbManager: CSUSBManager?
     
     private var displaySizeObserver: NSKeyValueObservation?
     private var displaySize: CGSize = .zero
     private var isDisplaySizeDynamic: Bool = false
     private var isFullScreen: Bool = false
     private let minDynamicSize = CGSize(width: 800, height: 600)
+    private let resizeTimeoutSecs: Double = 5
+    private var cancelResize: DispatchWorkItem?
     
+    private var localEventMonitor: Any? = nil
     private var ctrlKeyDown: Bool = false
+    
+    private var allUsbDevices: [CSUSBDevice] = []
+    private var connectedUsbDevices: [CSUSBDevice] = []
     
     // MARK: - User preferences
     
@@ -35,6 +44,7 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
     @Setting("AlwaysNativeResolution") private var isAlwaysNativeResolution: Bool = false
     @Setting("DisplayFixed") private var isDisplayFixed: Bool = false
     @Setting("CtrlRightClick") private var isCtrlRightClick: Bool = false
+    @Setting("NoUsbPrompt") private var isNoUsbPrompt: Bool = false
     private var settingObservations = [NSKeyValueObservation]()
     
     // MARK: - Init
@@ -84,14 +94,20 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
     override func enterLive() {
         metalView.isHidden = false
         screenshotView.isHidden = true
-        renderer!.sourceScreen = vmDisplay
-        renderer!.sourceCursor = vmInput
         displaySizeObserver = observe(\.vmDisplay!.displaySize, options: [.initial, .new]) { (_, change) in
             guard let size = change.newValue else { return }
             self.displaySizeDidChange(size: size)
         }
         if vmConfiguration!.shareClipboardEnabled {
             UTMPasteboard.general.requestPollingMode(forHashable: self) // start clipboard polling
+        }
+        // monitor Cmd+Q and Cmd+W and capture them if needed
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+            if !self.handleCaptureKeys(for: event) {
+                return event
+            } else {
+                return nil
+            }
         }
         super.enterLive()
         resizeConsoleToolbarItem.isEnabled = false // disable item
@@ -106,6 +122,16 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
         if vmConfiguration!.shareClipboardEnabled {
             UTMPasteboard.general.releasePollingMode(forHashable: self) // stop clipboard polling
         }
+        if vm.state == .vmStopped {
+            connectedUsbDevices.removeAll()
+            allUsbDevices.removeAll()
+        }
+        if let localEventMonitor = self.localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+            self.localEventMonitor = nil
+        }
+        releaseMouse()
+        displaySizeObserver = nil
         super.enterSuspended(isBusy: busy)
     }
     
@@ -113,10 +139,52 @@ class VMDisplayMetalWindowController: VMDisplayWindowController, UTMSpiceIODeleg
         captureMouse()
     }
 }
+
+// MARK: - SPICE IO
+extension VMDisplayMetalWindowController: UTMSpiceIODelegate {
+    func spiceDidChange(_ input: CSInput) {
+        vmInput = input
+    }
+    
+    func spiceDidCreateDisplay(_ display: CSDisplayMetal) {
+        if display.channelID == 0 && display.monitorID == 0 {
+            vmDisplay = display
+            renderer!.source = vmDisplay
+        }
+    }
+    
+    func spiceDidDestroyDisplay(_ display: CSDisplayMetal) {
+        //TODO: implement something here
+    }
+    
+    func spiceDidChange(_ usbManager: CSUSBManager) {
+        if usbManager != vmUsbManager {
+            connectedUsbDevices.removeAll()
+            allUsbDevices.removeAll()
+            vmUsbManager = usbManager
+            usbManager.delegate = self
+        }
+    }
+    
+    func spiceDynamicResolutionSupportDidChange(_ supported: Bool) {
+        if isDisplaySizeDynamic != supported {
+            displaySizeDidChange(size: displaySize)
+            DispatchQueue.main.async {
+                if supported, let window = self.window {
+                    _ = self.updateGuestResolution(for: window, frameSize: window.frame.size)
+                }
+            }
+        }
+        isDisplaySizeDynamic = supported
+    }
+}
     
 // MARK: - Screen management
 extension VMDisplayMetalWindowController {
     fileprivate func displaySizeDidChange(size: CGSize) {
+        // cancel any pending resize
+        cancelResize?.cancel()
+        cancelResize = nil
         guard size != .zero else {
             logger.debug("Ignoring zero size display")
             return
@@ -134,13 +202,6 @@ extension VMDisplayMetalWindowController {
                 self.updateHostFrame(forGuestResolution: size)
             }
         }
-    }
-    
-    func dynamicResolutionSupportDidChange(_ supported: Bool) {
-        if isDisplaySizeDynamic != supported {
-            displaySizeDidChange(size: displaySize)
-        }
-        isDisplaySizeDynamic = supported
     }
     
     func windowDidChangeScreen(_ notification: Notification) {
@@ -213,7 +274,12 @@ extension VMDisplayMetalWindowController {
         guard !self.isDisplayFixed else {
             return frameSize
         }
-        return updateHostScaling(for: sender, frameSize: frameSize)
+        let newSize = updateHostScaling(for: sender, frameSize: frameSize)
+        if isFullScreen {
+            return frameSize
+        } else {
+            return newSize
+        }
     }
     
     func windowDidEndLiveResize(_ notification: Notification) {
@@ -221,6 +287,12 @@ extension VMDisplayMetalWindowController {
             return
         }
         _ = updateGuestResolution(for: window, frameSize: window.frame.size)
+        cancelResize = DispatchWorkItem {
+            if let vmDisplay = self.vmDisplay {
+                self.displaySizeDidChange(size: vmDisplay.displaySize)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + resizeTimeoutSecs, execute: cancelResize!)
     }
     
     func windowDidEnterFullScreen(_ notification: Notification) {
@@ -280,9 +352,9 @@ extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
         let newX = absolutePoint.x * currentScreenScale / viewportScale
         let newY = (frameSize.height - absolutePoint.y) * currentScreenScale / viewportScale
         let point = CGPoint(x: newX, y: newY)
-        logger.debug("move cursor: cocoa (\(absolutePoint.x), \(absolutePoint.y)), native (\(newX), \(newY))")
+        logger.trace("move cursor: cocoa (\(absolutePoint.x), \(absolutePoint.y)), native (\(newX), \(newY))")
         vmInput?.sendMouseMotion(button, point: point)
-        vmInput?.forceCursorPosition(point) // required to show cursor on screen
+        vmDisplay?.forceCursorPosition(point) // required to show cursor on screen
     }
     
     func mouseMove(relativePoint: CGPoint, button: CSInputButton) {
@@ -342,5 +414,200 @@ extension VMDisplayMetalWindowController: VMMetalViewInputDelegate {
     
     func requestReleaseCapture() {
         releaseMouse()
+    }
+    
+    private func handleCaptureKeys(for event: NSEvent) -> Bool {
+        // if captured we route all keyevents to view, even Cmd+Q and Cmd+W
+        if let metalView = metalView, metalView.isMouseCaptured {
+            if event.type == .keyDown {
+                metalView.keyDown(with: event)
+            } else if event.type == .keyUp {
+                metalView.keyUp(with: event)
+            }
+            return true
+        }
+        // otherwise, we confirm Cmd+Q and Cmd+W
+        if event.modifierFlags.contains(.command) && event.type == .keyDown {
+            if event.keyCode == kVK_ANSI_Q {
+                showConfirmAlert(NSLocalizedString("Quitting UTM will kill all running VMs.", comment: "VMDisplayMetalWindowController")) {
+                    NSApp.terminate(self)
+                }
+                return true
+            } else if event.keyCode == kVK_ANSI_W {
+                if vm.state == .vmStarted {
+                    showConfirmAlert(NSLocalizedString("Closing this window will kill the VM.", comment: "VMDisplayMetalWindowController")) {
+                        DispatchQueue.global(qos: .background).async {
+                            self.vm.quitVM()
+                        }
+                    }
+                } else if vm.state == .vmStopped || vm.state == .vmError {
+                    return false // we can close the window
+                } else {
+                    return true // do not close window when in progress
+                }
+            }
+        } else if event.modifierFlags.contains(.command) && event.type == .keyUp {
+            // for some reason, macOS doesn't like to send Cmd+KeyUp
+            metalView.keyUp(with: event)
+            return true
+        }
+        return false
+    }
+}
+
+// MARK: - USB handling
+
+extension VMDisplayMetalWindowController: CSUSBManagerDelegate {
+    func spiceUsbManager(_ usbManager: CSUSBManager, deviceError error: String, for device: CSUSBDevice) {
+        logger.debug("USB device error: (\(device)) \(error)")
+        DispatchQueue.main.async {
+            self.showErrorAlert(error)
+        }
+    }
+    
+    func spiceUsbManager(_ usbManager: CSUSBManager, deviceAttached device: CSUSBDevice) {
+        logger.debug("USB device attached: \(device)")
+        if !isNoUsbPrompt {
+            DispatchQueue.main.async {
+                if self.window!.isKeyWindow {
+                    self.showConnectPrompt(for: device)
+                }
+            }
+        }
+    }
+    
+    func spiceUsbManager(_ usbManager: CSUSBManager, deviceRemoved device: CSUSBDevice) {
+        logger.debug("USB device removed: \(device)")
+        if let i = connectedUsbDevices.firstIndex(of: device) {
+            connectedUsbDevices.remove(at: i)
+        }
+    }
+    
+    func showConnectPrompt(for usbDevice: CSUSBDevice) {
+        guard let usbManager = vmUsbManager else {
+            logger.error("cannot get usb manager")
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = NSLocalizedString("USB Device", comment: "VMDisplayMetalWindowController")
+        alert.informativeText = NSLocalizedString("Would you like to connect '\(usbDevice.name ?? usbDevice.description)' to this virtual machine?", comment: "VMDisplayMetalWindowController")
+        alert.showsSuppressionButton = true
+        alert.addButton(withTitle: NSLocalizedString("Confirm", comment: "VMDisplayMetalWindowController"))
+        alert.addButton(withTitle: NSLocalizedString("Cancel", comment: "VMDisplayMetalWindowController"))
+        alert.beginSheetModal(for: window!) { response in
+            if let suppressionButton = alert.suppressionButton,
+               suppressionButton.state == .on {
+                self.isNoUsbPrompt = true
+            }
+            guard response == .alertFirstButtonReturn else {
+                return
+            }
+            DispatchQueue.global(qos: .background).async {
+                usbManager.connectUsbDevice(usbDevice) { (result, message) in
+                    DispatchQueue.main.async {
+                        if let msg = message {
+                            self.showErrorAlert(msg)
+                        }
+                        if result {
+                            self.connectedUsbDevices.append(usbDevice)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension VMDisplayMetalWindowController {
+    @IBAction override func usbButtonPressed(_ sender: Any) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let item = NSMenuItem()
+        item.title = NSLocalizedString("Querying USB devices...", comment: "VMDisplayMetalWindowController")
+        item.isEnabled = false
+        menu.addItem(item)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let devices = self.vmUsbManager?.usbDevices ?? []
+            DispatchQueue.main.async {
+                self.updateUsbDevicesMenu(menu, devices: devices)
+            }
+        }
+        if let event = NSApplication.shared.currentEvent {
+            NSMenu.popUpContextMenu(menu, with: event, for: sender as! NSView)
+        }
+    }
+    
+    func updateUsbDevicesMenu(_ menu: NSMenu, devices: [CSUSBDevice]) {
+        allUsbDevices = devices
+        menu.removeAllItems()
+        if devices.count == 0 {
+            let item = NSMenuItem()
+            item.title = NSLocalizedString("No USB devices detected.", comment: "VMDisplayMetalWindowController")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        for (i, device) in devices.enumerated() {
+            let item = NSMenuItem()
+            let canRedirect = vmUsbManager?.canRedirectUsbDevice(device, errorMessage: nil) ?? false
+            let isConnected = vmUsbManager?.isUsbDeviceConnected(device) ?? false
+            let isConnectedToSelf = connectedUsbDevices.contains(device)
+            item.title = device.name ?? device.description
+            item.isEnabled = canRedirect && (isConnectedToSelf || !isConnected);
+            item.state = isConnectedToSelf ? .on : .off;
+            item.tag = i
+            item.target = self
+            item.action = isConnectedToSelf ? #selector(disconnectUsbDevice) : #selector(connectUsbDevice)
+            menu.addItem(item)
+        }
+        menu.update()
+    }
+    
+    @objc func connectUsbDevice(sender: AnyObject) {
+        guard let menu = sender as? NSMenuItem else {
+            logger.error("wrong sender for connectUsbDevice")
+            return
+        }
+        guard let usbManager = vmUsbManager else {
+            logger.error("cannot get usb manager")
+            return
+        }
+        let device = allUsbDevices[menu.tag]
+        DispatchQueue.global(qos: .background).async {
+            usbManager.connectUsbDevice(device) { (result, message) in
+                DispatchQueue.main.async {
+                    if let msg = message {
+                        self.showErrorAlert(msg)
+                    }
+                    if result {
+                        self.connectedUsbDevices.append(device)
+                    }
+                }
+            }
+        }
+    }
+    
+    @objc func disconnectUsbDevice(sender: AnyObject) {
+        guard let menu = sender as? NSMenuItem else {
+            logger.error("wrong sender for disconnectUsbDevice")
+            return
+        }
+        guard let usbManager = vmUsbManager else {
+            logger.error("cannot get usb manager")
+            return
+        }
+        let device = allUsbDevices[menu.tag]
+        DispatchQueue.global(qos: .background).async {
+            usbManager.disconnectUsbDevice(device) { (result, message) in
+                DispatchQueue.main.async {
+                    if let msg = message {
+                        self.showErrorAlert(msg)
+                    }
+                    if result {
+                        self.connectedUsbDevices.removeAll(where: { $0 == device })
+                    }
+                }
+            }
+        }
     }
 }

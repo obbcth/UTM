@@ -142,14 +142,30 @@ class VMMetalView: MTKView {
     weak var inputDelegate: VMMetalViewInputDelegate?
     private var wholeTrackingArea: NSTrackingArea?
     private var lastModifiers = NSEvent.ModifierFlags()
-    private var isMouseCaptured = false
+    private(set) var isMouseCaptured = false
+    private(set) var isFirstResponder = false
+    private(set) var isMouseInWindow = false
     
     override var acceptsFirstResponder: Bool { true }
     
+    override func becomeFirstResponder() -> Bool {
+        isFirstResponder = true
+        if isMouseInWindow {
+            NSCursor.hide()
+        }
+        return super.becomeFirstResponder()
+    }
+    
+    override func resignFirstResponder() -> Bool {
+        isFirstResponder = false
+        return super.resignFirstResponder()
+    }
+    
     override func updateTrackingAreas() {
-        logger.debug("update tracking area")
-        let trackingArea = NSTrackingArea(rect: CGRect(origin: .zero, size: frame.size), options: [.mouseMoved, .mouseEnteredAndExited, .activeWhenFirstResponder], owner: self, userInfo: nil)
+        let trackingArea = NSTrackingArea(rect: CGRect(origin: .zero, size: frame.size), options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
+        logger.debug("update tracking area: \(trackingArea.rect)")
         if let oldTrackingArea = wholeTrackingArea {
+            logger.debug("remove old tracking area: \(oldTrackingArea.rect)")
             removeTrackingArea(oldTrackingArea)
             NSCursor.unhide()
         }
@@ -159,51 +175,55 @@ class VMMetalView: MTKView {
     }
     
     override func mouseEntered(with event: NSEvent) {
-        logger.debug("mouse entered")
-        NSCursor.hide()
+        logger.debug("mouse entered (first responder: \(isFirstResponder))")
+        isMouseInWindow = true
+        if isFirstResponder {
+            NSCursor.hide()
+        }
     }
     
     override func mouseExited(with event: NSEvent) {
         logger.debug("mouse exited")
+        isMouseInWindow = false
         NSCursor.unhide()
     }
     
     override func mouseDown(with event: NSEvent) {
-        logger.debug("mouse down: \(event.buttonNumber)")
+        logger.trace("mouse down: \(event.buttonNumber)")
         inputDelegate?.mouseDown(button: .left)
     }
     
     override func rightMouseDown(with event: NSEvent) {
-        logger.debug("right mouse down: \(event.buttonNumber)")
+        logger.trace("right mouse down: \(event.buttonNumber)")
         inputDelegate?.mouseDown(button: .right)
     }
     
     override func mouseUp(with event: NSEvent) {
-        logger.debug("mouse up: \(event.buttonNumber)")
+        logger.trace("mouse up: \(event.buttonNumber)")
         inputDelegate?.mouseUp(button: .left)
     }
     
     override func rightMouseUp(with event: NSEvent) {
-        logger.debug("right mouse up: \(event.buttonNumber)")
+        logger.trace("right mouse up: \(event.buttonNumber)")
         inputDelegate?.mouseUp(button: .right)
     }
     
     override func keyDown(with event: NSEvent) {
         guard !event.isARepeat else { return }
-        logger.debug("key down: \(event.keyCode)")
+        logger.trace("key down: \(event.keyCode)")
         inputDelegate?.keyDown(keyCode: macVkToScancode[Int(event.keyCode)] ?? 0)
     }
     
     override func keyUp(with event: NSEvent) {
-        logger.debug("key up: \(event.keyCode)")
+        logger.trace("key up: \(event.keyCode)")
         inputDelegate?.keyUp(keyCode: macVkToScancode[Int(event.keyCode)] ?? 0)
     }
     
     override func flagsChanged(with event: NSEvent) {
         let modifiers = event.modifierFlags
-        logger.debug("modifers: \(modifiers)")
+        logger.trace("modifers: \(modifiers)")
         if modifiers.isSuperset(of: [.option, .control]) {
-            logger.debug("release cursor")
+            logger.trace("release cursor")
             inputDelegate?.requestReleaseCapture()
         }
         sendModifiers(lastModifiers.subtracting(modifiers), press: false)
@@ -276,7 +296,7 @@ class VMMetalView: MTKView {
     }
     
     override func mouseMoved(with event: NSEvent) {
-        logger.debug("mouse moved: \(event.deltaX), \(event.deltaY)")
+        logger.trace("mouse moved: \(event.deltaX), \(event.deltaY)")
         if isMouseCaptured {
             inputDelegate?.mouseMove(relativePoint: CGPoint(x: event.deltaX, y: -event.deltaY),
                                      button: NSEvent.pressedMouseButtons.inputButtons())
@@ -289,9 +309,9 @@ class VMMetalView: MTKView {
     }
     
     override func scrollWheel(with event: NSEvent) {
-        guard event.scrollingDeltaY != 0 else { return }
-        logger.debug("scroll: \(event.scrollingDeltaY)")
-        inputDelegate?.mouseScroll(dy: event.scrollingDeltaY,
+        guard event.deltaY != 0 else { return }
+        logger.trace("scroll: \(event.deltaY)")
+        inputDelegate?.mouseScroll(dy: event.deltaY,
                                    button: NSEvent.pressedMouseButtons.inputButtons())
     }
 }

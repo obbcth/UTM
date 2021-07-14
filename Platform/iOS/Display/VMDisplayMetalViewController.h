@@ -37,6 +37,7 @@ NS_ASSUME_NONNULL_BEGIN
     BOOL _pencilForceRightClickOnce;
     VMCursor *_cursor;
     VMScroll *_scroll;
+    BOOL _mouseCaptured;
     
     // Gestures
     UISwipeGestureRecognizer *_swipeUp;
@@ -62,6 +63,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (weak, nonatomic) IBOutlet MTKView *mtkView;
 @property (weak, nonatomic) IBOutlet UIImageView *placeholderImageView;
 @property (weak, nonatomic) IBOutlet VMKeyboardView *keyboardView;
+
+@property (weak, nonatomic) CSInput *vmInput;
+@property (weak, nonatomic) CSDisplayMetal *vmDisplay;
 
 @property (nonatomic, assign) BOOL lastDisplayChangeResize;
 @property (nonatomic, readonly) BOOL serverModeCursor;

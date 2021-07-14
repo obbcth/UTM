@@ -131,12 +131,33 @@ class UTMData: ObservableObject {
         return ProcessInfo.processInfo.globallyUniqueString
     }
     
-    func newDefaultDriveName(type: UTMDiskImageType, forConfig: UTMConfiguration) -> String {
+    func newDefaultDrivePath(type: UTMDiskImageType, forConfig: UTMConfiguration) -> String {
         let nameForId = { (i: Int) in "\(type.description)-\(i).qcow2" }
         for i in 0..<1000 {
             let name = nameForId(i)
             let file = forConfig.imagesPath.appendingPathComponent(name)
             if !fileManager.fileExists(atPath: file.path) {
+                return name
+            }
+        }
+        return UUID().uuidString
+    }
+    
+    func newDefaultDriveName(for config: UTMConfiguration) -> String {
+        let nameForId = { (i: Int) in "drive\(i)" }
+        for i in 0..<1000 {
+            let name = nameForId(i)
+            var free: Bool = true
+            for j in 0..<config.countDrives {
+                guard let taken = config.driveName(for: j) else {
+                    continue
+                }
+                if taken == name {
+                    free = false
+                    break
+                }
+            }
+            if free {
                 return name
             }
         }
@@ -178,14 +199,21 @@ class UTMData: ObservableObject {
         }
     }
     
-    func discardChanges(forVM vm: UTMVirtualMachine) throws {
-        try vm.reloadConfiguration()
+    func discardChanges(forVM vm: UTMVirtualMachine? = nil) throws {
+        let config: UTMConfiguration
+        if let vm = vm {
+            try vm.reloadConfiguration()
+            config = vm.configuration
+        } else {
+            // create a tmp empty config so we can get orphanedDrives for tmp path
+            config = UTMConfiguration()
+        }
         // delete orphaned drives
-        guard let orphanedDrives = vm.configuration.orphanedDrives else {
+        guard let orphanedDrives = config.orphanedDrives else {
             return
         }
         for name in orphanedDrives {
-            let imagesPath = vm.configuration.imagesPath
+            let imagesPath = config.imagesPath
             let orphanPath = imagesPath.appendingPathComponent(name)
             logger.debug("Removing orphaned drive '\(name)'")
             try fileManager.removeItem(at: orphanPath)
@@ -348,10 +376,10 @@ class UTMData: ObservableObject {
             }
         }
         
-        let name = drive.lastPathComponent
+        let path = drive.lastPathComponent
         let imageType: UTMDiskImageType = drive.pathExtension.lowercased() == "iso" ? .CD : .disk
         let imagesPath = config.imagesPath
-        let dstPath = imagesPath.appendingPathComponent(name)
+        let dstPath = imagesPath.appendingPathComponent(path)
         if !fileManager.fileExists(atPath: imagesPath.path) {
             try fileManager.createDirectory(at: imagesPath, withIntermediateDirectories: false, attributes: nil)
         }
@@ -361,25 +389,26 @@ class UTMData: ObservableObject {
             try fileManager.moveItem(at: drive, to: dstPath)
         }
         DispatchQueue.main.async {
+            let name = self.newDefaultDriveName(for: config)
             let interface: String
             if let target = config.systemTarget {
                 interface = UTMConfiguration.defaultDriveInterface(forTarget: target, type: imageType)
             } else {
                 interface = "none"
             }
-            config.newDrive(name, type: imageType, interface: interface)
+            config.newDrive(name, path: path, type: imageType, interface: interface)
         }
     }
     
     func createDrive(_ drive: VMDriveImage, for config: UTMConfiguration) throws {
-        var name: String = ""
+        var path: String = ""
         if !drive.removable {
             guard drive.size > 0 else {
                 throw NSLocalizedString("Invalid drive size.", comment: "UTMData")
             }
-            name = newDefaultDriveName(type: drive.imageType, forConfig: config)
+            path = newDefaultDrivePath(type: drive.imageType, forConfig: config)
             let imagesPath = config.imagesPath
-            let dstPath = imagesPath.appendingPathComponent(name)
+            let dstPath = imagesPath.appendingPathComponent(path)
             if !fileManager.fileExists(atPath: imagesPath.path) {
                 try fileManager.createDirectory(at: imagesPath, withIntermediateDirectories: false, attributes: nil)
             }
@@ -391,20 +420,21 @@ class UTMData: ObservableObject {
         }
         
         DispatchQueue.main.async {
+            let name = self.newDefaultDriveName(for: config)
             let interface = drive.interface ?? "none"
             if drive.removable {
-                config.newRemovableDrive(drive.imageType, interface: interface)
+                config.newRemovableDrive(name, type: drive.imageType, interface: interface)
             } else {
-                config.newDrive(name, type: drive.imageType, interface: interface)
+                config.newDrive(name, path: path, type: drive.imageType, interface: interface)
             }
         }
     }
     
     func removeDrive(at index: Int, for config: UTMConfiguration) throws {
-        if let name = config.driveImagePath(for: index) {
-            let path = config.imagesPath.appendingPathComponent(name);
-            if fileManager.fileExists(atPath: path.path) {
-                try fileManager.removeItem(at: path)
+        if let path = config.driveImagePath(for: index) {
+            let fullPath = config.imagesPath.appendingPathComponent(path);
+            if fileManager.fileExists(atPath: fullPath.path) {
+                try fileManager.removeItem(at: fullPath)
             }
         }
         
@@ -443,6 +473,24 @@ class UTMData: ObservableObject {
                 self.selectedVM = newVM
             }
         }
+    }
+    
+    func isSupported(systemArchitecture: String?) -> Bool {
+        guard let arch = systemArchitecture else {
+            return true // ignore this
+        }
+        let bundleURL = Bundle.main.bundleURL
+        #if os(macOS)
+        let contentsURL = bundleURL.appendingPathComponent("Contents", isDirectory: true)
+        let base = "Versions/A/"
+        #else
+        let contentsURL = bundleURL
+        let base = ""
+        #endif
+        let frameworksURL = contentsURL.appendingPathComponent("Frameworks", isDirectory: true)
+        let framework = frameworksURL.appendingPathComponent("qemu-" + arch + "-softmmu.framework/" + base + "qemu-" + arch + "-softmmu", isDirectory: false)
+        logger.error("\(framework.path)")
+        return fileManager.fileExists(atPath: framework.path)
     }
     
     func busyWork(_ work: @escaping () throws -> Void) {

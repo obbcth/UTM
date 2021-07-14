@@ -110,7 +110,7 @@ static size_t sysctl_read(const char *name) {
 }
 
 - (CPUCount)emulatedCpuCount {
-    static const CPUCount singleCpu = {
+    static const __unused CPUCount singleCpu = {
         .cpus = 1,
         .threads = 1,
     };
@@ -126,9 +126,17 @@ static size_t sysctl_read(const char *name) {
         };
         return userCount; // user override
     }
-#if defined(__aarch64__)
-    // in ARM we can only emulate other weak architectures
     NSString *arch = self.configuration.systemArchitecture;
+    // SPARC5 defaults to single CPU
+    if ([arch hasPrefix:@"sparc"]) {
+        return singleCpu;
+    }
+#if defined(__aarch64__)
+    CPUCount hostPcoreCount = {
+        .cpus = sysctl_read("hw.perflevel0.physicalcpu"),
+        .threads = sysctl_read("hw.perflevel0.logicalcpu"),
+    };
+    // in ARM we can only emulate other weak architectures
     if ([arch isEqualToString:@"alpha"] ||
         [arch isEqualToString:@"arm"] ||
         [arch isEqualToString:@"aarch64"] ||
@@ -137,7 +145,11 @@ static size_t sysctl_read(const char *name) {
         [arch hasPrefix:@"ppc"] ||
         [arch hasPrefix:@"riscv"] ||
         [arch hasPrefix:@"xtensa"]) {
-        return hostCount;
+        if (self.useOnlyPcores && hostPcoreCount.cpus > 0) {
+            return hostPcoreCount;
+        } else {
+            return hostCount;
+        }
     } else {
         return singleCpu;
     }
@@ -192,6 +204,11 @@ static size_t sysctl_read(const char *name) {
     } else if ([interface isEqualToString:@"usb"]) {
         [self pushArgv:@"-device"];
         [self pushArgv:[NSString stringWithFormat:@"usb-storage,drive=%@,removable=%@,bootindex=%lu", identifier, removable ? @"true" : @"false", bootindex++]];
+    } else if ([interface isEqualToString:@"floppy"] && [self.configuration.systemTarget hasPrefix:@"q35"]) {
+        [self pushArgv:@"-device"];
+        [self pushArgv:[NSString stringWithFormat:@"isa-fdc,id=fdc%lu,bootindexA=%lu", busindex, bootindex++]];
+        [self pushArgv:@"-device"];
+        [self pushArgv:[NSString stringWithFormat:@"floppy,unit=0,bus=fdc%lu.0,drive=%@", busindex++, identifier]];
     } else {
         return interface; // no expand needed
     }
@@ -222,6 +239,32 @@ static size_t sysctl_read(const char *name) {
     [self pushArgv:[NSString stringWithFormat:@"cpus=%lu,sockets=1,cores=%lu,threads=%lu", self.emulatedCpuCount.threads, self.emulatedCpuCount.cpus, self.emulatedCpuCount.threads / self.emulatedCpuCount.cpus]];
 }
 
+- (void)argsForSound {
+    // < macOS 11.3 we use fork() which is buggy and things are broken
+    BOOL forceDisableSound = NO;
+    if (@available(macOS 11.3, *)) {
+    } else {
+        if (self.configuration.displayConsoleOnly) {
+            forceDisableSound = YES;
+        }
+    }
+    if (self.configuration.soundEnabled && !forceDisableSound) {
+        if ([self.configuration.soundCard isEqualToString:@"screamer"]) {
+            // force CoreAudio backend for mac99 which only supports 44100 Hz
+            [self pushArgv:@"-audiodev"];
+            [self pushArgv:@"coreaudio,id=audio0"];
+            // no device setting for screamer
+        } else {
+            [self pushArgv:@"-device"];
+            [self pushArgv:self.configuration.soundCard];
+            if ([self.configuration.soundCard containsString:@"hda"]) {
+                [self pushArgv:@"-device"];
+                [self pushArgv:@"hda-duplex"];
+            }
+        }
+    }
+}
+
 - (void)argsForDrives {
     NSMutableDictionary<NSString *, NSNumber *> *busInterfaceMap = [NSMutableDictionary dictionary];
     for (NSUInteger i = 0; i < self.configuration.countDrives; i++) {
@@ -246,7 +289,7 @@ static size_t sysctl_read(const char *name) {
             case UTMDiskImageTypeDisk:
             case UTMDiskImageTypeCD: {
                 NSString *interface = [self.configuration driveInterfaceTypeForIndex:i];
-                BOOL removable = [self.configuration driveRemovableForIndex:i];
+                BOOL removable = (type == UTMDiskImageTypeCD) || [self.configuration driveRemovableForIndex:i];
                 NSString *identifier = [NSString stringWithFormat:@"drive%lu", i];
                 NSString *realInterface = [self expandDriveInterface:interface identifier:identifier removable:removable busInterfaceMap:busInterfaceMap];
                 NSString *drive;
@@ -302,7 +345,26 @@ static size_t sysctl_read(const char *name) {
         [self pushArgv:@"-device"];
         [self pushArgv:[NSString stringWithFormat:@"%@,mac=%@,netdev=net0", self.configuration.networkCard, self.configuration.networkCardMac]];
         [self pushArgv:@"-netdev"];
-        NSMutableString *netstr = [NSMutableString stringWithString:@"user,id=net0"];
+        NSString *device = @"user";
+        NSMutableString *netstr;
+        if ([self.configuration.networkMode isEqualToString:@"shared"]) {
+            device = @"vmnet-macos";
+            if (self.configuration.networkIsolate) {
+                netstr = [NSMutableString stringWithString:@"vmnet-macos,mode=host,id=net0"];
+            } else {
+                netstr = [NSMutableString stringWithString:@"vmnet-macos,mode=shared,id=net0"];
+            }
+        } else if ([self.configuration.networkMode isEqualToString:@"bridged"]) {
+            netstr = [NSMutableString stringWithString:@"vmnet-macos,mode=bridged,id=net0"];
+            if (self.configuration.networkBridgeInterface.length > 0) {
+                [netstr appendFormat:@",ifname=%@", self.configuration.networkBridgeInterface];
+            }
+        } else {
+            netstr = [NSMutableString stringWithString:@"user,id=net0"];
+            if (self.configuration.networkIsolate) {
+                [netstr appendString:@",restrict=on"];
+            }
+        }
         if (self.configuration.networkAddress.length > 0) {
             [netstr appendFormat:@",net=%@", self.configuration.networkAddress];
         }
@@ -314,9 +376,6 @@ static size_t sysctl_read(const char *name) {
         }
         if (self.configuration.networkHostIPv6.length > 0) {
             [netstr appendFormat:@",ipv6-host=%@", self.configuration.networkHostIPv6];
-        }
-        if (self.configuration.networkIsolate) {
-            [netstr appendString:@",restrict=on"];
         }
         if (self.configuration.networkHost.length > 0) {
             [netstr appendFormat:@",hostname=%@", self.configuration.networkHost];
@@ -348,26 +407,52 @@ static size_t sysctl_read(const char *name) {
 }
 
 - (void)argsForUsb {
-    // assume that for virt machines we can use USB 3.0 controller
-    if ([self.configuration.systemTarget hasPrefix:@"virt"]) {
-        [self pushArgv:@"-device"];
-        [self pushArgv:@"qemu-xhci"];
-    } else if ([self.configuration.systemTarget hasPrefix:@"pc"]) {
-        // USB 1.0 controller for old PC system
-        [self pushArgv:@"-usb"];
-    } else { // USB 2.0 controller is most compatible
-        [self pushArgv:@"-device"];
-        [self pushArgv:@"usb-ehci"];
-    }
     // set up USB input devices unless user requested legacy (QEMU default PS/2 input)
     if (!self.configuration.inputLegacy) {
+        if ([self.configuration.systemTarget hasPrefix:@"virt"]) {
+            [self pushArgv:@"-device"];
+            [self pushArgv:@"qemu-xhci,id=usb-bus"];
+        } else {
+            [self pushArgv:@"-usb"];
+        }
         [self pushArgv:@"-device"];
-        [self pushArgv:@"usb-tablet"];
+        [self pushArgv:@"usb-tablet,bus=usb-bus.0"];
         [self pushArgv:@"-device"];
-        [self pushArgv:@"usb-mouse"];
+        [self pushArgv:@"usb-mouse,bus=usb-bus.0"];
         [self pushArgv:@"-device"];
-        [self pushArgv:@"usb-kbd"];
+        [self pushArgv:@"usb-kbd,bus=usb-bus.0"];
     }
+#if !defined(WITH_QEMU_TCI)
+    NSInteger maxDevices = [self.configuration.usbRedirectionMaximumDevices integerValue];
+    if (self.configuration.usb3Support) {
+        NSString *controller = @"qemu-xhci";
+        if ([self.configuration.systemTarget hasPrefix:@"pc"] || [self.configuration.systemTarget hasPrefix:@"q35"]) {
+            controller = @"nec-usb-xhci"; // Windows 7 doesn't like qemu-xchi
+        }
+        for (int j = 0; j < ((maxDevices + 2) / 3); j++) {
+            [self pushArgv:@"-device"];
+            [self pushArgv:[NSString stringWithFormat:@"%@,id=usb-controller-%d", controller, j]];
+        }
+    } else {
+        for (int j = 0; j < ((maxDevices + 2) / 3); j++) {
+            [self pushArgv:@"-device"];
+            [self pushArgv:[NSString stringWithFormat:@"ich9-usb-ehci1,id=usb-controller-%d", j]];
+            [self pushArgv:@"-device"];
+            [self pushArgv:[NSString stringWithFormat:@"ich9-usb-uhci1,masterbus=usb-controller-%d.0,firstport=0,multifunction=on", j]];
+            [self pushArgv:@"-device"];
+            [self pushArgv:[NSString stringWithFormat:@"ich9-usb-uhci2,masterbus=usb-controller-%d.0,firstport=2,multifunction=on", j]];
+            [self pushArgv:@"-device"];
+            [self pushArgv:[NSString stringWithFormat:@"ich9-usb-uhci3,masterbus=usb-controller-%d.0,firstport=4,multifunction=on", j]];
+        }
+    }
+    // set up usb forwarding
+    for (int i = 0; i < maxDevices; i++) {
+        [self pushArgv:@"-chardev"];
+        [self pushArgv:[NSString stringWithFormat:@"spicevmc,name=usbredir,id=usbredirchardev%d", i]];
+        [self pushArgv:@"-device"];
+        [self pushArgv:[NSString stringWithFormat:@"usb-redir,chardev=usbredirchardev%d,id=usbredirdev%d,bus=usb-controller-%d.0", i, i, i / 3]];
+    }
+#endif
 }
 
 - (void)argsForSharing {
@@ -407,10 +492,12 @@ static size_t sysctl_read(const char *name) {
     }
     accel = [accel stringByAppendingFormat:@",tb-size=%ld", tb_size];
     
+#if !defined(WITH_QEMU_TCI)
     // use mirror mapping when we don't have JIT entitlements
     if (!jb_has_jit_entitlement()) {
         accel = [accel stringByAppendingString:@",split-wx=on"];
     }
+#endif
     
     return accel;
 }
@@ -422,6 +509,11 @@ static size_t sysctl_read(const char *name) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     return self.configuration.isTargetArchitectureMatchHost && ![defaults boolForKey:@"NoHypervisor"];
 #endif
+}
+
+- (BOOL)useOnlyPcores {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    return [defaults boolForKey:@"UseOnlyPcores"];
 }
 
 - (BOOL)hasCustomBios {
@@ -471,6 +563,9 @@ static size_t sysctl_read(const char *name) {
     [self pushArgv:@"-S"]; // startup stopped
     [self pushArgv:@"-qmp"];
     [self pushArgv:[NSString stringWithFormat:@"tcp:127.0.0.1:%lu,server,nowait", self.qmpPort]];
+    // prevent QEMU default devices, which leads to duplicate CD drive (fix #2538)
+    // see https://github.com/qemu/qemu/blob/6005ee07c380cbde44292f5f6c96e7daa70f4f7d/docs/qdev-device-use.txt#L382
+    [self pushArgv:@"-nodefaults"];
     [self pushArgv:@"-vga"];
     [self pushArgv:@"none"];// -vga none, avoid adding duplicate graphics cards
     if (self.configuration.displayConsoleOnly) {
@@ -505,27 +600,20 @@ static size_t sysctl_read(const char *name) {
     [self pushArgv:[self tcgAccelProperties]];
     [self architectureSpecificConfiguration];
     [self targetSpecificConfiguration];
-    if (![self.configuration.systemBootDevice isEqualToString:@"hdd"]) {
-        [self pushArgv:@"-boot"];
+    // legacy boot order; new bootindex uses drive ordering
+    [self pushArgv:@"-boot"];
+    if (self.configuration.systemBootDevice.length > 0 && ![self.configuration.systemBootDevice isEqualToString:@"hdd"]) {
         if ([self.configuration.systemBootDevice isEqualToString:@"floppy"]) {
             [self pushArgv:@"order=ab"];
         } else {
             [self pushArgv:@"order=d"];
         }
+    } else {
+        [self pushArgv:@"menu=on"];
     }
     [self pushArgv:@"-m"];
     [self pushArgv:[self.configuration.systemMemory stringValue]];
-    // < macOS 11.3 we use fork() which is buggy and things are broken
-    if (@available(macOS 11.3, *)) {
-        if (self.configuration.soundEnabled) {
-            [self pushArgv:@"-device"];
-            [self pushArgv:self.configuration.soundCard];
-            if ([self.configuration.soundCard containsString:@"hda"]) {
-                [self pushArgv:@"-device"];
-                [self pushArgv:@"hda-duplex"];
-            }
-        }
-    }
+    [self argsForSound];
     [self pushArgv:@"-name"];
     [self pushArgv:self.configuration.name];
     if (self.usbSupported) {
